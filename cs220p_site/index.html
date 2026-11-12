@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS220P labs: week 1</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#243041; --ink-2:#3d4a5f; --muted:#6f7c90; --paper:#f7f9fc; --panel:#ffffff; --line:#e4e9f1;
+  --lagoon:#5b7cfa; --lagoon-2:#4a67d6; --sand:#fff4cc; --sand-2:#f3d98a; --coral:#ee8a84; --mint:#dcf3ea; --mint-2:#3fae8a;
+  --focus:#f5b942;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --ink:#e8ecf4; --ink-2:#c9d2e3; --muted:#93a0b8; --paper:#171c26; --panel:#1f2633; --line:#2f3847;
+  --lagoon:#8fa6ff; --lagoon-2:#aebfff; --sand:#3b3524; --sand-2:#7d6a3a; --coral:#ff9a94; --mint:#1f3d33; --mint-2:#7fd1b9;
+  color-scheme:dark; }}
+:root[data-theme="dark"]{
+  --ink:#e8ecf4; --ink-2:#c9d2e3; --muted:#93a0b8; --paper:#171c26; --panel:#1f2633; --line:#2f3847;
+  --lagoon:#8fa6ff; --lagoon-2:#aebfff; --sand:#3b3524; --sand-2:#7d6a3a; --coral:#ff9a94; --mint:#1f3d33; --mint-2:#7fd1b9;
+  color-scheme:dark; }
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.5}
+h1,h2,h3{font-family:"Bricolage Grotesque","Public Sans",system-ui,sans-serif;line-height:1.1;margin:0 0 .4em;font-weight:600;letter-spacing:-.01em}
+h1{font-size:clamp(1.6rem,3.2vw,2.4rem)} h2{font-size:1.45rem} h3{font-size:1.1rem;margin-top:1.2em}
+p{margin:.4em 0 .8em;max-width:70ch}
+a{color:var(--lagoon)}
+code,pre{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-size:.92em}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.8em 1em;overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;margin:.6em 0;font-size:.95rem}
+th,td{border-bottom:1px solid var(--line);padding:.35em .7em;text-align:left;vertical-align:top}
+th{color:var(--ink-2);font-weight:600}
+.wide{overflow-x:auto;max-width:100%}
+button{font:inherit;cursor:pointer;border:1px solid var(--lagoon);background:var(--lagoon);color:#fff;border-radius:8px;padding:.45em .95em}
+button.ghost{background:transparent;color:var(--lagoon);}
+button.danger{background:var(--coral);border-color:var(--coral)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+input[type=text],input[type=number],select,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.4em .6em;max-width:100%}
+textarea{width:100%;min-height:6em}
+input[type=range]{width:100%;accent-color:var(--lagoon)}
+/* layout */
+.app{display:grid;grid-template-columns:270px 1fr;min-height:100vh}
+.rail{border-right:1px solid var(--line);background:var(--panel);padding:1.2rem 1rem;position:sticky;top:env(safe-area-inset-top,0px);height:100vh;overflow-y:auto}
+.rail .brand{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:.95rem;color:var(--muted);margin-bottom:.2rem}
+.rail h1{font-size:1.25rem;margin-bottom:1rem}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{margin:0}
+.steps button{display:flex;gap:.6rem;align-items:baseline;width:100%;text-align:left;background:transparent;border:0;color:var(--ink-2);padding:.45rem .5rem;border-radius:8px;font-size:.93rem}
+.steps button:hover{background:var(--paper)}
+.steps button.active{background:var(--sand);color:var(--ink);font-weight:600}
+.steps .n{display:inline-block;min-width:1.6em;color:var(--muted);font-variant-numeric:tabular-nums;font-size:.85em}
+.steps button.tour{color:var(--coral);font-weight:600}
+.rail .tools{margin-top:1.2rem;border-top:1px solid var(--line);padding-top:.9rem;display:flex;flex-direction:column;gap:.5rem;font-size:.9rem}
+.rail .tools label{display:flex;gap:.5rem;align-items:center}
+.main{padding:1.6rem clamp(1rem,3vw,2.6rem) 4rem;max-width:1180px;width:100%}
+.step-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:.6rem}
+.step-head .where{color:var(--muted);font-size:.9rem}
+.theory{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--lagoon);border-radius:10px;padding:1rem 1.2rem;margin:.8rem 0 1.2rem}
+.theory h3:first-child{margin-top:0}
+.theory ul{padding-left:1.2em;margin:.3em 0}
+.ask{background:var(--sand);border-radius:10px;padding:.9rem 1.2rem;margin:1rem 0;display:none}
+.ask.show{display:block}
+.ask .q{font-weight:600}
+.ask .a{color:var(--ink-2);margin:.2em 0 .6em}
+.ask details{margin:.3em 0}
+.lab.narrow{grid-template-columns:220px 1fr}
+.lab{display:grid;grid-template-columns:minmax(230px,300px) 1fr;gap:1.2rem;align-items:start;margin:1rem 0}
+.controls{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;display:flex;flex-direction:column;gap:.7rem}
+.controls .ctl label{display:flex;justify-content:space-between;font-size:.9rem;color:var(--ink-2);margin-bottom:.1rem}
+.controls .ctl .val{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
+.controls .ctl select,.controls .ctl input[type=text]{width:100%}
+.controls .btns{display:flex;gap:.5rem;flex-wrap:wrap}
+.stage{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.8rem;min-width:0}
+.stage canvas{width:100%;height:auto;display:block;max-width:100%;border-radius:6px}
+.metrics{display:flex;gap:.8rem;flex-wrap:wrap;margin:.6rem 0}
+.metric{background:var(--paper);border-radius:8px;padding:.5rem .8rem;min-width:120px}
+.metric .k{font-size:.78rem;color:var(--muted)}
+.metric .v{font-size:1.25rem;font-weight:700;font-variant-numeric:tabular-nums}
+.metric.good .v{color:var(--mint-2)} .metric.bad .v{color:var(--coral)}
+.note{color:var(--muted);font-size:.9rem}
+.badge{display:inline-block;background:var(--mint);color:var(--ink);border-radius:999px;padding:.1em .7em;font-size:.85rem}
+.badge.warn{background:var(--sand)}
+.quiz{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:.7rem}
+.quiz .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem}
+.quiz .card .q{font-weight:600;margin-bottom:.3rem}
+.quiz .card select{width:100%}
+.quiz .card .fb{font-size:.9rem;margin-top:.3rem;min-height:1.3em}
+.nav{display:flex;justify-content:space-between;margin-top:2rem;gap:1rem}
+.mission{border:2px dashed var(--sand-2);border-radius:10px;padding:.8rem 1rem;margin:1rem 0}
+.mission h3{margin-top:0}
+.mission li.done{color:var(--mint-2)}
+.leader{width:100%}
+.leader td.pts{font-weight:700;text-align:right}
+.lock{background:var(--sand);border-radius:10px;padding:.8rem 1rem;margin:.6rem 0}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;background:var(--paper);padding:.5rem .7rem;border-radius:8px;user-select:all}
+.hidden{display:none !important}
+.timeline{height:8px;background:var(--line);border-radius:4px;position:relative;margin:.4rem 0}
+.timeline > div{position:absolute;top:0;bottom:0;background:var(--lagoon);border-radius:4px}
+.legend{display:flex;gap:1rem;flex-wrap:wrap;font-size:.85rem;color:var(--ink-2);margin:.3rem 0}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:.35em;vertical-align:-1px}
+.tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0}
+.tabs button{background:transparent;color:var(--ink-2);border:1px solid var(--line)}
+.tabs button.on{background:var(--lagoon);color:#fff;border-color:var(--lagoon)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;font-size:.92rem}
+@media (max-width:860px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+  .steps{display:flex;flex-wrap:wrap;gap:.2rem}
+  .steps button{width:auto;padding:.35rem .6rem}
+  .lab{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion: reduce){ *{animation:none !important;transition:none !important} }
+
+.deeper{margin:.6rem 0 1rem;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.deeper summary{cursor:pointer;padding:.6rem 1rem;color:var(--lagoon-2);font-weight:600}
+.deeper .body{padding:0 1.2rem .9rem}
+.deeper .body p{max-width:78ch}
+
+.home{max-width:960px;margin:0 auto;padding:2rem clamp(1rem,4vw,3rem) 4rem}
+.home h1{font-size:clamp(2rem,5vw,3.2rem);margin:.2em 0 .3em}
+.lede{font-size:1.15rem;max-width:62ch;color:var(--ink-2)}
+.labs{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin:2rem 0}
+.labcard{display:block;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.2rem;border-top:6px solid var(--lagoon)}
+.labcard.sun{border-top-color:var(--sand-2)}
+.labcard .day{color:var(--muted);font-size:.9rem}
+.labcard h2{margin:.2em 0 .4em}
+.labcard p{color:var(--ink-2);margin:0}
+.how{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.2rem 1.4rem}
+.how ol{padding-left:1.2em}
+</style>
+</head>
+<body>
+<main class="home">
+<div class="brand" style="color:var(--muted);font-weight:600">CS220P Data Analytics, KAUST</div>
+<h1>Week 1 labs</h1>
+<p class="lede">Four interactive labs. Each one walks through the lecture's ideas step by step: move the controls, press the examples to watch them animate, try the edge cases. Every lab ends with a live tournament.</p>
+<p><a href="leaderboard.html"><b>Live leaderboard</b></a></p>
+<div class="labs">
+  <div class="labcard"><div class="day">Thursday, lab 1 · Intelligent agents</div><h2>Keep the servers cool, cheaply</h2><p>A data-center cooling controller: reflex, model-based, goal-based, utility-based and learning agents, then the cooling league.</p><p style="margin-top:.6rem"><a href="lab1.html">Open the lab</a></p></div>
+  <div class="labcard"><div class="day">Thursday, lab 2 · Solving problems by searching</div><h2>The campus delivery robot</h2><p>BFS and DFS by hand (a timed challenge), search at work (flood fill, knight moves, word ladders, folders), depth-limited and iterative deepening, tree vs graph search, the exponential blow-up, bidirectional search and the 8-puzzle, then the warehouse dispatch league.</p><p style="margin-top:.6rem"><a href="lab2.html">Open the lab</a></p></div>
+  <div class="labcard sun"><div class="day">Sunday, lab 1 · Data mining and data</div><h2>The student survey</h2><p>Attribute types, measurement error, outliers, missing values, duplicates, sampling, transformations, PCA, then the cleaning challenge.</p><p style="margin-top:.6rem"><a href="lab3.html">Open the lab</a></p></div>
+  <div class="labcard sun"><div class="day">Sunday, lab 2 · Measures of similarity</div><h2>Diagnose the pump</h2><p>A pump trips at a gas plant: find the most similar past failure. Minkowski distances, standardizing sensors, SMC vs Jaccard on alarm codes, cosine on technician notes, correlation of vibration trends, Mahalanobis for anomaly alarms, then the diagnosis league.</p><p style="margin-top:.6rem"><a href="lab4.html">Open the lab</a></p></div>
+</div>
+<div class="how">
+<h2>How the tournaments work</h2>
+<ol>
+<li>The TA announces the teams (for example A1, A2, B1).</li>
+<li>Open the lab's tournament step (★), enter your name and team, and use <b>Practice run</b> as often as you like. Practice uses practice data; the official run uses different hidden data, so the winning strategy is the robust one.</li>
+<li><b>Official run</b>: once per person. Your settings are sent to the server, which scores them on the hidden data. Nobody, including you, sees that data, so the score cannot be tuned to it or faked.</li>
+<li>The <a href="leaderboard.html">live leaderboard</a> updates by itself, by player and by team. The TA projects it.</li>
+</ol>
+<p class="note">Everything except the official scoring runs in your browser. No installation, no account, works on phones.</p>
+</div>
+</main>
+</body>
+</html>

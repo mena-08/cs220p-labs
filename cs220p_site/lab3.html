@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS220P Lab 3: Data and data quality</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<script src="lab.js"></script>
+<script>
+window.LAB_TASKS = {
+intro: `Name one prediction task and one description task you could run on this table. Which column should be dropped before any analysis, and why?`,
+types: `Classify every attribute. For satisfaction and ac_temp_c, write which statistics are allowed and which are not.`,
+datasets: `Answer the six questions. Give one example from your phone of record data, graph data and ordered data.`,
+measurement: `Set bias 1.0 and noise 0.2, then bias 0 and noise 1.0. Which instrument would you rather own, and what would you do to fix each?`,
+outliers: `Inject 20 data-entry errors. Compare mean and median. Try the three detection rules and record how many real students each one flags by mistake.`,
+missing: `At 30% missing, compare the four strategies on the estimated mean and the correlation. Then switch on "not at random" and find the strategy that stays closest to the truth (there may be none).`,
+duplicates: `Set typo rate 40% and 30 duplicates. Count CS students before and after standardizing and deduplicating. Write one case where deleting a duplicate would be wrong.`,
+sampling: `Find the smallest sample size at which the smallest major always has at least 3 students, with and without stratification. Read the error curve: how much does doubling n help?`,
+transform: `Apply log to commute_min and describe the histogram change. Discretize sleep into 4 bins both ways and explain which one a decision tree would prefer.`,
+dimensions: `Untick centring and describe where PC1 points. Re-tick it, untick normalization, and explain which attribute now dominates PC1 and why.`,
+tournament: `Build a cleaning pipeline, practice on the three surveys, then do your single official run and send the code to the TA.`,
+};
+
+window.LAB_DEEPER = {
+types: `<p>The four levels are Stevens' scales of measurement (1946). A scale is defined by the group of transformations that preserves its information: permutations for nominal, monotone maps for ordinal, affine maps x ↦ ax + b for interval, similarities x ↦ ax for ratio. A statistic is permissible if it is invariant (up to the same transformation) under that group: the mean of an ordinal variable can change its ordering under a monotone relabeling, the median cannot. The practical consequence for the rest of the course: Pearson correlation and k-means assume at least interval data; Spearman's rank correlation and k-medoids work on ordinal data.</p>`,
+measurement: `<p>For an estimator X of a true value θ: MSE = E[(X − θ)²] = (E[X] − θ)² + Var(X) = bias² + variance, by adding and subtracting E[X] and noting the cross term vanishes. This decomposition reappears as the bias-variance trade-off of models in the classification lecture. Precision is the inverse of variance; accuracy is the inverse of MSE; a biased but precise instrument can be calibrated, a noisy one can only be averaged (variance falls as 1/n).</p>`,
+outliers: `<p>The sample mean has breakdown point 0: one arbitrarily large value moves it arbitrarily; the median has breakdown point 50%. The z-rule is motivated by Chebyshev's inequality, P(|X − μ| ≥ kσ) ≤ 1/k², a distribution-free bound that is loose; for Gaussian data |z| > 3 flags 0.27%. Its weakness is masking: the outlier inflates the sample σ used to detect it. Tukey's fences Q1 − 1.5·IQR and Q3 + 1.5·IQR correspond to ±2.7σ for Gaussian data and are robust because quartiles have breakdown point 25%. In high dimensions use robust covariance (minimum covariance determinant) and Mahalanobis distance (Lab 4).</p>`,
+missing: `<p>Rubin's taxonomy: MCAR (missingness independent of everything), MAR (depends only on observed values), MNAR (depends on the missing value itself, our short-sleepers case). Complete-case analysis is unbiased only under MCAR; mean imputation preserves the mean under MCAR but biases variance downward and attenuates correlations, because imputed points have zero residual variance. Regression or multiple imputation (Rubin 1987) draws several plausible values and pools estimates with between-imputation variance. Under MNAR no imputation from the observed data is unbiased without a model of the missingness mechanism; the honest answer is sensitivity analysis.</p>`,
+sampling: `<p>The standard error of a sample mean is σ/√n, which is the 1/√n curve on the screen. Stratified sampling with proportional allocation has variance Σ<sub>h</sub> W<sub>h</sub>² σ<sub>h</sub>²/n<sub>h</sub>, never larger than simple random sampling when the strata means differ, and it guarantees coverage of small strata. Sampling without replacement adds the finite population correction (1 − n/N). Progressive sampling detects the plateau of a learning curve; for clustering, the inter-sample distance between two independent samples drops once both are representative.</p>`,
+transform: `<p>Standardization is the affine map that gives mean 0 and variance 1; it is a permissible transformation only for interval and ratio scales. The log transform is variance-stabilizing for multiplicative noise and turns lognormal commute times into Gaussian ones. Equal-frequency binning is the quantile transform; entropy-based supervised discretization (Fayyad and Irani 1993) chooses the cut that minimizes the class entropy of the two intervals and stops with an MDL criterion. One-hot encoding embeds m categories in an (m − 1)-dimensional simplex; it is what makes nominal attributes usable by distance-based and linear methods.</p>`,
+dimensions: `<p>Distance concentration (Beyer et al. 1999): for i.i.d. coordinates, (max<sub>i</sub> d<sub>i</sub> − min<sub>i</sub> d<sub>i</sub>)/min<sub>i</sub> d<sub>i</sub> → 0 in probability as the dimension grows, so nearest-neighbor queries lose meaning unless the data lies near a low-dimensional manifold. PCA: with the centered data matrix X<sub>c</sub> (n × p), the covariance is X<sub>c</sub>ᵀX<sub>c</sub>/(n − 1) and its eigenvectors are the principal axes; via the SVD X<sub>c</sub> = USVᵀ the axes are the columns of V and the variance along axis j is s<sub>j</sub>²/(n − 1). The proportion of variance explained by the first k components is Σ<sub>j≤k</sub> s<sub>j</sub>² / Σ<sub>j</sub> s<sub>j</sub>². Without centring you decompose X<sup>T</sup>X, whose first eigenvector points at the mean, the trap on the slides; without scaling, the attribute with the largest variance wins. PCA is the best linear reconstruction in the least-squares sense (Eckart-Young); nonlinear alternatives (kernel PCA, t-SNE, UMAP) relax linearity.</p>`,
+};
+
+/* Lab 3: Data Mining and Data. Scenario: the campus student survey */
+(function () {
+  const { h, RNG, fmt, mean, sd, median, range, select, check, metric, canvas, css, quiz, tournament, clamp, tween, sleep, examples, callout, pulse } = Lab;
+  const MAJORS = ["CS", "EE", "ME", "Bio", "Chem"];
+  const MAJOR_TYPOS = { CS: ["cs", "Comp Sci", "C.S."], EE: ["ee", "Elec Eng", "EE "], ME: ["me", "Mech", "M.E."], Bio: ["bio", "Biology", "BIO"], Chem: ["chem", "Chemistry", "CHEM"] };
+  const MAJOR_COLORS = { CS: "#5b7cfa", EE: "#ee8a84", ME: "#3fae8a", Bio: "#d9a520", Chem: "#9b6bd6" };
+  const YEARS = ["1st year", "2nd year", "3rd year", "4th year", "MS", "PhD"];
+  const COLS = ["id", "major", "year", "satisfaction", "sleep_hours", "coffee_cups", "commute_min", "ac_temp_c", "study_hours", "gpa"];
+
+  function clean(seed, n = 300) {
+    const rng = RNG(seed); const rows = [];
+    for (let i = 0; i < n; i++) {
+      const major = MAJORS[Math.min(4, Math.floor(rng() * 5))];
+      const study = clamp(rng.normal(20 + MAJORS.indexOf(major) * 1.2, 6), 2, 45);
+      const sleep = clamp(rng.normal(6.8 - MAJORS.indexOf(major) * 0.15, 1.0), 3.5, 10);
+      const gpa = clamp(2.1 + 0.07 * study + 0.05 * (sleep - 6.8) + rng.normal(0, 0.3), 1.5, 4.0);
+      let coffee = 0; { const L = Math.exp(-2.2); let p = 1; while ((p *= rng()) > L) coffee++; }
+      const commute = Math.exp(rng.normal(Math.log(14), 0.6));
+      const temp = rng.normal(22.5, 1.4);
+      const sat = clamp(Math.round(2.5 + 0.6 * (sleep - 6.8) + rng.normal(0, 0.9)), 1, 5);
+      rows.push({ id: 1000 + i, major, year: YEARS[Math.min(5, Math.floor(rng() * 6))], satisfaction: sat, sleep_hours: +sleep.toFixed(1), coffee_cups: coffee, commute_min: +commute.toFixed(0), ac_temp_c: +temp.toFixed(1), study_hours: +study.toFixed(1), gpa: +gpa.toFixed(2) });
+    }
+    return rows;
+  }
+  /* inject quality problems. p: {missing, missingBiased, outliers, typos, duplicates, noise} */
+  function messy(rows, p, seed) {
+    const rng = RNG(seed + 77); let out = rows.map((r) => ({ ...r }));
+    out.forEach((r) => {
+      let pm = p.missing; if (p.missingBiased) pm = r.sleep_hours < 6 ? p.missing * 2.5 : p.missing * 0.4;
+      if (rng() < pm) r.sleep_hours = null; if (rng() < p.missing) r.commute_min = null;
+      if (p.noise > 0) r.study_hours = +(r.study_hours + rng.normal(0, p.noise)).toFixed(1);
+      if (rng() < p.typos) { const v = MAJOR_TYPOS[r.major]; r.major = v[rng.int(v.length)]; }
+    });
+    for (let k = 0; k < p.outliers; k++) { const r = out[rng.int(out.length)]; const kind = rng.int(3); if (kind === 0) r.sleep_hours = 60 + rng.int(25); else if (kind === 1) r.coffee_cups = 30 + rng.int(40); else r.commute_min = 900 + rng.int(600); }
+    for (let k = 0; k < p.duplicates; k++) { const r = out[rng.int(rows.length)]; const d = { ...r }; if (rng() < 0.5 && d.commute_min != null) d.commute_min += 1; out.push(d); }
+    return out;
+  }
+  const canon = (m) => { if (m == null) return m; const t = String(m).trim().toLowerCase().replace(/[^a-z]/g, ""); if (t.startsWith("c") && t.includes("s") && !t.startsWith("ch")) return "CS"; if (t.startsWith("e")) return "EE"; if (t.startsWith("m")) return "ME"; if (t.startsWith("b")) return "Bio"; if (t.startsWith("ch")) return "Chem"; return m; };
+  const col = (rows, k) => rows.map((r) => r[k]).filter((v) => v != null && !isNaN(v));
+  /* Pearson correlation of the rows where both values exist; NaN when it is not defined (fewer than 2 pairs, or zero variance) */
+  const corr = (rows, a, b) => { const xs = [], ys = []; rows.forEach((r) => { if (r[a] != null && r[b] != null) { xs.push(r[a]); ys.push(r[b]); } }); if (xs.length < 2) return NaN; const mx = mean(xs), my = mean(ys); let sxy = 0, sxx = 0, syy = 0; xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; syy += (ys[i] - my) ** 2; }); return sxx * syy > 0 ? sxy / Math.sqrt(sxx * syy) : NaN; };
+  /* Lab.mean of an empty list is 0; for statistics shown to students an empty list must give "undefined" */
+  const avg = (a) => (a.length ? mean(a) : NaN);
+  /* make leading and trailing spaces visible ("EE " → "EE␣"); inner spaces are normal text */
+  const vis = (s) => String(s).replace(/^ +| +$/g, (m) => "␣".repeat(m.length));
+  /* axis tick label without a stray "-0" */
+  const tick = (x, d) => { const s = fmt(x, d); return s === "-0" ? "0" : s; };
+  const tint = (c, p) => `color-mix(in srgb, ${c.startsWith("#") ? c : `var(${c})`} ${p}%, transparent)`;
+
+  /* animation helpers */
+  /* lerp: numbers glide, arrays and objects of the same shape glide element-wise, everything else (strings, NaN, shape changes) switches to the target */
+  function lerp(a, b, t) {
+    if (typeof a === "number" && typeof b === "number") return isFinite(a) && isFinite(b) ? a + (b - a) * t : b;
+    if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length ? b.map((x, i) => lerp(a[i], x, t)) : b;
+    if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) { const o = {}; for (const k in b) o[k] = k in a ? lerp(a[k], b[k], t) : b[k]; return o; }
+    return b;
+  }
+  /* morpher(draw): returns go(target, {ms, instant}); each call glides the drawn state from wherever it is now to target; a newer call takes over an older one */
+  function morpher(draw, ms = 450) {
+    let cur = null, gen = 0;
+    return (target, o = {}) => {
+      const g = ++gen, from = cur;
+      if (!from || o.instant) { cur = target; draw(target); return Promise.resolve(); }
+      return tween(o.ms || ms, (t) => { if (g !== gen) return; cur = lerp(from, target, t); draw(cur); });
+    };
+  }
+  /* metricsBox: a row of metrics whose numbers count to their new values; non-finite numbers show "undefined" */
+  function metricsBox() {
+    const el = h("div", { class: "metrics" }); let keys = "", els = [], gen = 0; const vals = {};
+    el.update = (items) => {
+      const k = items.map((it) => it.k).join("|");
+      if (k !== keys) { keys = k; el.innerHTML = ""; els = items.map((it) => { const m = metric(it.k, ""); el.append(m); return m; }); }
+      const g = ++gen, anims = [];
+      items.forEach((it, i) => {
+        const m = els[i], v = m.querySelector(".v"), d = it.d ?? 2, u = it.u || "", old = vals[it.k];
+        m.className = "metric " + (it.cls || "");
+        if (typeof it.v === "number" && isFinite(it.v)) {
+          vals[it.k] = it.v;
+          if (typeof old === "number" && Math.abs(old - it.v) > 1e-12) anims.push([v, old, it.v, d, u]); else v.textContent = fmt(it.v, d) + u;
+        } else { vals[it.k] = null; v.textContent = typeof it.v === "number" ? "undefined" : it.v; }
+      });
+      if (anims.length) tween(350, (t) => { if (g !== gen) return; anims.forEach(([v, a, b, d, u]) => (v.textContent = fmt(a + (b - a) * t, d) + u)); });
+    };
+    return el;
+  }
+  /* statusBox: one callout that only re-renders when its message changes (no flicker while a slider glides) */
+  function statusBox() {
+    const el = h("div"); let last = "";
+    el.set = (html, kind = "edge") => { const key = html ? kind + html : ""; if (key === last) return; last = key; el.innerHTML = ""; if (html) el.append(callout(html, kind)); };
+    return el;
+  }
+
+  /* drawing helpers */
+  function histState(values, o = {}) {
+    const v = values.filter((x) => x != null && isFinite(x));
+    let lo = o.min ?? (v.length ? Math.min(...v) : 0), hi = o.max ?? (v.length ? Math.max(...v) : 1);
+    if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+    const nb = o.bins ?? 30, bins = new Array(nb).fill(0);
+    v.forEach((x) => bins[clamp(Math.floor(((x - lo) / (hi - lo)) * nb), 0, nb - 1)]++);
+    return { lo, hi, bins, lines: o.lines || [], title: o.title || "", binColors: o.binColors || null, empty: v.length ? "" : o.emptyMsg || "No values to plot." };
+  }
+  function drawHist(cv, st, box) {
+    const ctx = cv.getContext("2d"), bx = box || { x: 0, y: 0, w: cv.width, h: cv.height };
+    if (!box) ctx.clearRect(0, 0, cv.width, cv.height);
+    const L = bx.x + 40, R = bx.x + bx.w - 10, T = bx.y + 18, B = bx.y + bx.h - 26, lo = st.lo, hi = st.hi, nb = st.bins.length;
+    const bmax = Math.max(1, ...st.bins), X = (x) => L + ((x - lo) / (hi - lo)) * (R - L), Y = (c) => T + (1 - c / bmax) * (B - T), bw = (R - L) / nb;
+    st.bins.forEach((c, i) => { if (c < 0.02) return; ctx.fillStyle = (st.binColors && st.binColors[i]) || css("--lagoon"); ctx.fillRect(L + i * bw + 1, Y(c), Math.max(1, bw - 2), Y(0) - Y(c)); });
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, B + 0.5); ctx.lineTo(R, B + 0.5); ctx.stroke();
+    ctx.font = "12px Public Sans"; ctx.fillStyle = css("--muted"); ctx.textAlign = "center";
+    for (let g = 0; g <= 5; g++) { const x = lo + (g / 5) * (hi - lo); ctx.fillText(tick(x, hi - lo < 3 ? 2 : 1), X(x), B + 16); }
+    ctx.textAlign = "left";
+    (st.lines || []).forEach((ln) => {
+      if (!isFinite(ln.x) || ln.x < lo - 1e-9 || ln.x > hi + 1e-9) return;
+      ctx.strokeStyle = ln.color; ctx.setLineDash(ln.dash || []); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(ln.x), T); ctx.lineTo(X(ln.x), B); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = ln.color; const right = X(ln.x) > R - 110; ctx.textAlign = right ? "right" : "left"; ctx.fillText(ln.label || "", X(ln.x) + (right ? -4 : 4), T + 12 + (ln.dy || 0)); ctx.textAlign = "left";
+    });
+    if (st.title) { ctx.fillStyle = css("--ink"); ctx.fillText(st.title, L, bx.y + 12); }
+    if (st.empty) { ctx.fillStyle = css("--coral"); ctx.textAlign = "center"; ctx.fillText(st.empty, (L + R) / 2, (T + B) / 2); ctx.textAlign = "left"; }
+    return { X, Y };
+  }
+  function table(rows, cols, limit = 12) {
+    const t = h("table", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c))));
+    rows.slice(0, limit).forEach((r) => t.append(h("tr", {}, ...cols.map((c) => h("td", { style: r[c] == null ? "color:var(--coral)" : "" }, r[c] == null ? "missing" : r[c])))));
+    return h("div", { class: "wide" }, t, rows.length > limit ? h("p", { class: "note" }, `${rows.length - limit} more rows`) : null);
+  }
+  function lineChart(cv, series, opts = {}) {
+    const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+    const pad = { l: 44, r: 12, t: 22, b: 28 }; const xs = series.flatMap((s) => s.pts.map((p) => p[0])), ys = series.flatMap((s) => s.pts.map((p) => p[1]));
+    const xlo = opts.xmin ?? Math.min(...xs), xhi = opts.xmax ?? Math.max(...xs), ylo = opts.ymin ?? Math.min(...ys), yhi = opts.ymax ?? Math.max(...ys);
+    const X = (x) => pad.l + ((x - xlo) / (xhi - xlo || 1)) * (W - pad.l - pad.r), Y = (y) => pad.t + (1 - (y - ylo) / (yhi - ylo || 1)) * (H - pad.t - pad.b);
+    ctx.font = "12px Public Sans"; ctx.fillStyle = css("--muted"); for (let g = 0; g <= 4; g++) { const y = ylo + (g / 4) * (yhi - ylo); ctx.fillText(tick(y, 2), 4, Y(y) + 4); } for (let g = 0; g <= 4; g++) { const x = xlo + (g / 4) * (xhi - xlo); ctx.fillText(tick(x, 0), X(x) - 8, H - 8); }
+    ctx.textAlign = "right"; ctx.fillText(opts.xlabel || "", W - pad.r, H - pad.b - 6); ctx.textAlign = "left";
+    series.forEach((s, j) => { ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath(); s.pts.forEach((p, i) => (i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])))); ctx.stroke(); ctx.fillStyle = s.color; ctx.fillRect(pad.l + j * 150, 6, 10, 10); ctx.fillStyle = css("--ink"); ctx.fillText(s.name, pad.l + 14 + j * 150, 15); });
+    if (opts.marker && isFinite(opts.marker.x) && isFinite(opts.marker.y)) {
+      const m = opts.marker; ctx.strokeStyle = css("--lagoon"); ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(m.x), pad.t); ctx.lineTo(X(m.x), H - pad.b); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = css("--lagoon"); ctx.beginPath(); ctx.arc(X(m.x), Y(m.y), 6, 0, 7); ctx.fill();
+      const right = X(m.x) > W - 160, ly = Y(m.y) - 8 < pad.t + 16 ? Y(m.y) + 20 : Y(m.y) - 8; ctx.textAlign = right ? "right" : "left"; ctx.fillText(m.label || "", X(m.x) + (right ? -10 : 10), ly); ctx.textAlign = "left";
+    }
+    return { X, Y };
+  }
+
+  const CLEAN = clean(1);
+  const steps = [];
+
+  steps.push({
+    id: "intro", title: "What is data mining, and what is data?", time: 10,
+    theory: `<h3>From raw records to patterns</h3>
+      <p><b>Data mining</b> is the non-trivial extraction of implicit, previously unknown and potentially useful information from data: exploring large quantities of data, automatically or semi-automatically, to find meaningful patterns. The two families of methods:</p>
+      <ul><li><b>Prediction</b>: use some variables to predict unknown or future values of others. Classification (which major will a student choose?), regression (what GPA will they get?).</li>
+      <li><b>Description</b>: find human-interpretable patterns. Clustering (groups of similar students), anomaly detection (a strange record), association analysis (coffee drinkers also skip breakfast).</li></ul>
+      <p>Before any of that we need to understand the <b>data</b>: a collection of <b>data objects</b> (records, points, cases, instances) described by <b>attributes</b> (variables, fields, features, dimensions). Our running example is a campus student survey: 300 students, 10 attributes. We generated it, so we also have the <i>true</i> clean version, which lets us measure how much damage each quality problem does.</p>`,
+    ask: `<div class='a'>Click "One object = one row" and "One attribute = one column" first, then ask for one prediction task and one description task on this table ("Prediction vs description" shows one of each). Ask which attribute is the object identifier and whether it carries information before clicking the edge case: 300 distinct ids for 300 students, so it identifies and describes nothing. Removing it is feature selection.</div>`,
+    mount() {
+      const SHOW = 10;
+      const head = COLS.map((c) => h("th", {}, c));
+      const rowEls = CLEAN.slice(0, SHOW).map((r) => h("tr", {}, ...COLS.map((c) => h("td", {}, r[c]))));
+      const cells = rowEls.map((tr) => [...tr.children]);
+      const all = [...head, ...cells.flat()];
+      all.forEach((td) => (td.style.transition = "background .25s, opacity .4s"));
+      const info = h("div", { class: "callout info" }, "Click a button above: the table will show what an object and an attribute are.");
+      const mb = metricsBox();
+      const showMetrics = (attrs = COLS.length) => mb.update([{ k: "Objects (rows)", v: CLEAN.length, d: 0 }, { k: "Attributes (columns)", v: attrs, d: 0 }]);
+      const reset = () => { all.forEach((td) => { td.style.background = ""; td.style.opacity = ""; }); showMetrics(); };
+      showMetrics();
+      const ex = examples([
+        { label: "One object = one row", kind: "example", note: "The highlight walks down the table. Each row is one student: one <b>data object</b> (record, case, instance), described by the same 10 attributes.", run: async () => {
+          reset();
+          for (let i = 0; i < SHOW; i++) {
+            if (i) cells[i - 1].forEach((td) => (td.style.background = ""));
+            cells[i].forEach((td) => (td.style.background = tint("--lagoon", 25)));
+            const r = CLEAN[i]; info.innerHTML = `Object ${i + 1} of ${CLEAN.length}: student ${r.id}, ${r.major}, ${r.year}, sleeps ${r.sleep_hours} h, GPA ${r.gpa}.`;
+            await sleep(420);
+          }
+        } },
+        { label: "One attribute = one column", kind: "example", note: "The column sleep_hours lights up cell by cell. An <b>attribute</b> is one property measured on every object; its values across all 300 students form a variable.", run: async () => {
+          reset(); const j = COLS.indexOf("sleep_hours"); head[j].style.background = tint("--mint-2", 40);
+          for (let i = 0; i < SHOW; i++) { cells[i][j].style.background = tint("--mint-2", 25); await sleep(150); }
+          const v = col(CLEAN, "sleep_hours"), lo = Math.min(...v), hi = Math.max(...v);
+          await tween(1000, (t) => (info.innerHTML = `Attribute <b>sleep_hours</b>: ${fmt(v.length * t, 0)} values counted.`));
+          info.innerHTML = `Attribute <b>sleep_hours</b>: ${v.length} values, from ${fmt(lo, 1)} to ${fmt(hi, 1)} h, mean ${fmt(mean(v), 2)} h.`;
+        } },
+        { label: "Prediction vs description", kind: "example", note: "First the inputs (blue) and the target (red) of a <b>prediction</b> task light up; then the rows are colored by group, which is what a <b>description</b> task looks for.", run: async () => {
+          reset(); const g = COLS.indexOf("gpa");
+          for (let j = 1; j < COLS.length; j++) { if (j === g) continue; head[j].style.background = tint("--lagoon", 30); cells.forEach((row) => (row[j].style.background = tint("--lagoon", 12))); await sleep(140); }
+          head[g].style.background = tint("--coral", 55); cells.forEach((row) => (row[g].style.background = tint("--coral", 35)));
+          info.innerHTML = "<b>Prediction</b>: the blue attributes are the inputs, the red one (gpa) is the target. Predicting a number is regression.";
+          await sleep(2200); reset();
+          for (let i = 0; i < SHOW; i++) { cells[i].forEach((td) => (td.style.background = tint(MAJOR_COLORS[CLEAN[i].major], 22))); await sleep(120); }
+          info.innerHTML = "<b>Description</b>: no target. Here the rows are grouped by major; clustering would find groups like these on its own.";
+        } },
+        { label: "The id column", kind: "edge", note: "Every value in this column is different. The counter checks how many distinct ids there are, then the column fades out.", run: async () => {
+          reset(); head[0].style.background = tint("--coral", 45); cells.forEach((r) => (r[0].style.background = tint("--coral", 22)));
+          const ids = new Set(CLEAN.map((r) => r.id));
+          await tween(1100, (t) => (info.innerHTML = `Distinct ids: <b>${fmt(ids.size * t, 0)}</b> for ${CLEAN.length} objects.`));
+          info.innerHTML = `Distinct ids: <b>${ids.size}</b> for ${CLEAN.length} objects. Every value is unique, so the id identifies a student but describes nothing. Its mean (${fmt(mean(CLEAN.map((r) => r.id)), 1)}) can be computed and means nothing.`;
+          await sleep(2000);
+          await tween(800, (t) => [head[0], ...cells.map((r) => r[0])].forEach((td) => (td.style.opacity = String(1 - 0.75 * t))));
+          showMetrics(COLS.length - 1);
+          info.innerHTML += ` Dropped: ${COLS.length - 1} attributes left. Removing an attribute is <b>feature selection</b>.`;
+        } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "stage" }, h("h3", { style: "margin-top:0" }, "The survey, first rows"), info, h("div", { class: "wide" }, h("table", {}, h("tr", {}, ...head), ...rowEls)), h("p", { class: "note" }, `${CLEAN.length - SHOW} more rows`), mb));
+    },
+  });
+
+  steps.push({
+    id: "types", title: "Attribute types and what you may compute", time: 15,
+    theory: `<h3>Nominal, ordinal, interval, ratio</h3>
+      <p>The type of an attribute is defined by which operations make sense on its values:</p>
+      <table><tr><th>Type</th><th>Operations that make sense</th><th>Allowed statistics</th><th>Example</th></tr>
+      <tr><td>Nominal</td><td>= ≠ (distinctness)</td><td>mode, entropy, contingency tables</td><td>major, zip code, ID</td></tr>
+      <tr><td>Ordinal</td><td>= ≠ &lt; &gt; (order)</td><td>median, percentiles, rank correlation</td><td>satisfaction 1 to 5, year of study, grades</td></tr>
+      <tr><td>Interval</td><td>+ − (differences are meaningful)</td><td>mean, standard deviation, Pearson correlation</td><td>temperature in °C, calendar dates</td></tr>
+      <tr><td>Ratio</td><td>× ÷ (a true zero, ratios are meaningful)</td><td>geometric mean, percent variation</td><td>hours, counts, money, Kelvin, age</td></tr></table>
+      <p>Attribute <i>values</i> are not the attribute: ID and age are both integers, but "the mean ID" is meaningless. Is 20 °C twice as warm as 10 °C? No: Celsius has no true zero. 20 K is twice 10 K.</p>
+      <p>The test for a type: apply a transformation that keeps the information (relabel, rescale, shift) and see which statements survive. The scale lab below does exactly that, step by step.</p>`,
+    ask: `<div class='a'>Run "Hours to minutes", "°C to °F" and "Relabel satisfaction" in that order and ask before each run which number on screen will stay fixed. Common mistakes: satisfaction 1 to 5 treated as ratio ("4 is twice as satisfied as 2", no). AC temperature in °C is interval, not ratio: the Kelvin edge case drops the ratio 24 ÷ 12 from 2 to 1.04. coffee_cups is a ratio attribute that is also discrete (a count). Year of study is ordinal, not nominal. Then let them do the quiz.</div>`,
+    mount() {
+      const SC = {
+        ratio: { label: "sleep_hours: hours to minutes (× 60)", rows: [[{ n: "Ana", x: 4 }, { n: "Ben", x: 8 }]], f: (x) => 60 * x, zero: true, unit: "hours → minutes",
+          stats: ([[a, b]]) => [{ k: "Ben ÷ Ana", v: b / a, cls: "good" }, { k: "Ben − Ana", v: b - a, d: 1 }] },
+        fahr: { label: "ac_temp_c: °C to °F (1.8 x + 32)", rows: [[{ n: "12 °C", x: 12 }, { n: "18 °C", x: 18 }, { n: "24 °C", x: 24 }]], f: (x) => 1.8 * x + 32, zero: true, unit: "°C → °F",
+          stats: ([[a, b, c]]) => [{ k: "24 ÷ 12 (ratio)", v: c / a, cls: Math.abs(c / a - 2) < 0.01 ? "good" : "bad" }, { k: "(24 − 18) ÷ (18 − 12)", v: (c - b) / (b - a), cls: "good" }] },
+        kelvin: { label: "ac_temp_c: °C to K (x + 273.15)", rows: [[{ n: "12 °C", x: 12 }, { n: "18 °C", x: 18 }, { n: "24 °C", x: 24 }]], f: (x) => x + 273.15, zero: true, unit: "°C → K",
+          stats: ([[a, b, c]]) => [{ k: "24 ÷ 12 (ratio)", v: c / a, cls: Math.abs(c / a - 2) < 0.01 ? "good" : "bad" }, { k: "(24 − 18) ÷ (18 − 12)", v: (c - b) / (b - a), cls: "good" }] },
+        ordinal: { label: "satisfaction: relabel 4 → 10, 5 → 11", rows: [[2, 3, 3, 3, 4].map((x) => ({ n: "", x })), [1, 1, 4, 4, 4].map((x) => ({ n: "", x }))], names: ["Group A", "Group B"], f: (x) => ({ 1: 1, 2: 2, 3: 3, 4: 10, 5: 11 })[x], zero: false, unit: "answer codes", centers: true,
+          stats: ([A, B]) => { const mA = mean(A), mB = mean(B), dA = median(A), dB = median(B); return [{ k: "Mean A", v: mA }, { k: "Mean B", v: mB }, { k: "Mean says", v: mA > mB ? "A happier" : "B happier", cls: mA > mB ? "good" : "bad" }, { k: "Median A", v: dA }, { k: "Median B", v: dB }, { k: "Median says", v: dA > dB ? "A happier" : "B happier", cls: "good" }]; } },
+        nominal: { label: "major stored as codes 1 to 5: shuffle the codes", rows: [["CS", "CS", "CS", "Bio", "Chem", "EE"].map((m) => ({ n: m, x: MAJORS.indexOf(m) + 1 }))], f: (x) => [5, 1, 4, 2, 3][x - 1], zero: false, unit: "codes", centers: true, nominal: true,
+          stats: ([R]) => { const m = mean(R); return [{ k: "Mean code", v: m, cls: Math.abs(m - 14 / 6) < 0.01 ? "" : "bad" }, { k: "Mode", v: "CS", cls: "good" }]; } },
+      };
+      let key = "ratio", t = 0;
+      const cv = canvas(760, 230), mb = metricsBox(), status = statusBox();
+      function draw() {
+        const sc = SC[key], T = (x) => (1 - t) * x + t * sc.f(x);
+        const R = sc.rows.map((row) => row.map((p) => T(p.x)));
+        const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+        const allv = R.flat().concat(sc.zero ? [0, T(0)] : []); let lo = Math.min(...allv), hi = Math.max(...allv); const span = hi - lo || 1; lo -= span * 0.08; hi += span * 0.08;
+        const L = 90, Rt = W - 20, X = (x) => L + ((x - lo) / (hi - lo)) * (Rt - L);
+        ctx.font = "12px Public Sans"; ctx.fillStyle = css("--ink"); ctx.fillText(`${sc.label}: ${fmt(100 * t, 0)}% applied (${sc.unit})`, 10, 16);
+        R.forEach((vals, r) => {
+          const y = sc.rows.length === 1 ? 130 : 85 + r * 95;
+          ctx.strokeStyle = css("--muted"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(Rt, y); ctx.stroke();
+          ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; for (let g = 0; g <= 6; g++) { const x = lo + (g / 6) * (hi - lo); ctx.fillRect(X(x) - 0.5, y - 3, 1, 6); ctx.fillText(tick(x, hi - lo < 20 ? 1 : 0), X(x), y + 18); }
+          ctx.textAlign = "left"; if (sc.names) { ctx.fillStyle = css("--ink"); ctx.fillText(sc.names[r], 8, y + 4); }
+          const seen = {}, stackOf = vals.map((x) => { const kx = fmt(x, 3); return [kx, (seen[kx] = (seen[kx] || 0) + 1) - 1]; });
+          vals.forEach((x, i) => {
+            const [kx, stack] = stackOf[i], py = y - 14 - stack * 20;
+            ctx.fillStyle = sc.nominal ? MAJOR_COLORS[sc.rows[r][i].n] : css("--lagoon"); ctx.beginPath(); ctx.arc(X(x), py, 8, 0, 7); ctx.fill();
+            const name = sc.rows[r][i].n;
+            if (name && stack === seen[kx] - 1) { ctx.fillStyle = css("--ink"); ctx.textAlign = "center"; ctx.fillText(sc.nominal ? (seen[kx] > 1 ? `${name} ×${seen[kx]}` : name) + ` (code ${fmt(x, 1)})` : `${name}: ${fmt(x, 1)}`, X(x), py - 13); ctx.textAlign = "left"; }
+          });
+          if (sc.centers) {
+            const m = mean(vals), md = median(vals);
+            ctx.fillStyle = css("--coral"); ctx.beginPath(); ctx.moveTo(X(m), y + 26); ctx.lineTo(X(m) - 6, y + 36); ctx.lineTo(X(m) + 6, y + 36); ctx.fill(); ctx.fillText("mean", X(m) + 8, y + 36);
+            if (!sc.nominal) { ctx.fillStyle = css("--mint-2"); ctx.beginPath(); ctx.moveTo(X(md), y + 26); ctx.lineTo(X(md) - 6, y + 36); ctx.lineTo(X(md) + 6, y + 36); ctx.fill(); ctx.fillText("median", X(md) - 50, y + 36); }
+          }
+          if (sc.zero) {
+            ctx.strokeStyle = css("--mint-2"); ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(0), y - 60); ctx.lineTo(X(0), y + 8); ctx.stroke();
+            ctx.strokeStyle = css("--coral"); ctx.beginPath(); ctx.moveTo(X(T(0)), y - 60); ctx.lineTo(X(T(0)), y + 8); ctx.stroke(); ctx.setLineDash([]);
+            ctx.fillStyle = css("--mint-2"); ctx.fillText("0 on the new scale", X(0) + 4, y - 64);
+            if (Math.abs(T(0)) > 1e-9) { ctx.fillStyle = css("--coral"); ctx.fillText("old zero", X(T(0)) + 4, y - 50); }
+          }
+        });
+        mb.update(sc.stats(R));
+        status.set(key === "kelvin" && t > 0.99 ? "0 °C is a convention (the freezing point of water), not 'no temperature'. On the Kelvin scale, which has a true zero, 24 °C is only 1.04 times 12 °C. Ratios of Celsius values mean nothing." : key === "nominal" && t > 0.99 ? "The codes are labels. After the shuffle the mean code is 3.5 instead of 2.33, with the same students. Only the mode (CS) survives a relabeling, so a nominal attribute allows only =, ≠ and counts." : "", "edge");
+      }
+      const tCtl = range({ label: "Apply the transformation", min: 0, max: 1, step: 0.01, value: 0, fmt: (v) => fmt(100 * v, 0) + "%", onchange: (v) => { t = v; draw(); } });
+      const scSel = select({ label: "Scenario", options: Object.entries(SC).map(([value, s]) => ({ value, label: s.label })), value: key, onchange: (v) => { key = v; t = 0; tCtl.set(0); draw(); } });
+      draw();
+      const play = async (k) => { scSel.apply(k); await sleep(600); await tCtl.animateTo(1, 2200); await sleep(300); };
+      const ex = examples([
+        { label: "Hours to minutes", kind: "example", note: "Every value is multiplied by 60 while you watch. <b>Ben ÷ Ana stays 2</b> the whole way and the zero does not move: ratios survive a pure scaling, so sleep_hours is a <b>ratio</b> attribute.", run: () => play("ratio") },
+        { label: "°C to °F", kind: "example", note: "The map is 1.8 x + 32: it stretches <i>and</i> shifts, so the zero moves. The ratio 24 ÷ 12 drifts from 2 to 1.4, but the ratio of differences stays 1. On an <b>interval</b> scale only differences carry meaning.", run: () => play("fahr") },
+        { label: "Relabel satisfaction", kind: "example", note: "Answers 4 and 5 are relabeled 10 and 11. The order is unchanged, so this is a legal relabeling of an <b>ordinal</b> scale. Watch the 'Mean says' box flip almost at once; the 'Median says' box never changes.", run: () => play("ordinal") },
+        { label: "Is 24 °C twice 12 °C?", kind: "edge", note: "Shift to Kelvin, the scale with a true zero. The old zero slides far to the right of the new one, and the ratio collapses from 2 to 1.04.", run: () => play("kelvin") },
+        { label: "Numbers that are labels", kind: "edge", note: "Majors stored as codes 1 to 5 look numeric, so software happily averages them. Shuffle the codes: the students fly to new positions, the mean code changes, the mode does not.", run: () => play("nominal") },
+      ]);
+      const T4 = ["Nominal", "Ordinal", "Interval", "Ratio"];
+      const items = [
+        { q: "id (student number)", options: T4, answer: "Nominal", why: "Only equality matters; the number is a label." },
+        { q: "major", options: T4, answer: "Nominal", why: "No order between CS and Bio." },
+        { q: "year (1st year ... PhD)", options: T4, answer: "Ordinal", why: "Ordered, but the gap 1st to 2nd is not comparable to MS to PhD." },
+        { q: "satisfaction (1 to 5)", options: T4, answer: "Ordinal", why: "Order yes; differences are not meaningful, so no mean, use the median." },
+        { q: "sleep_hours", options: T4, answer: "Ratio", why: "True zero; 8 h is twice 4 h." },
+        { q: "coffee_cups", options: T4, answer: "Ratio", why: "A count: ratio, and also discrete." },
+        { q: "ac_temp_c (preferred AC temperature, °C)", options: T4, answer: "Interval", why: "Differences are meaningful, ratios are not (no true zero)." },
+        { q: "gpa (0 to 4)", options: T4, answer: ["Interval", "Ratio"], why: "Usually treated as interval: the scale is bounded and 0 is not 'no achievement'. Debatable." },
+        { q: "Does 'mean satisfaction = 3.4' make sense?", options: ["Yes", "No, use the median"], answer: "No, use the median", why: "Ordinal: the median or percentiles are the right summaries." },
+        { q: "Is 24 °C 'twice as warm' as 12 °C?", options: ["Yes", "No"], answer: "No", why: "Interval scale; in Kelvin the ratio is about 1.04." },
+        { q: "Which transformation keeps a ratio attribute's meaning?", options: ["new = a × old", "new = a × old + b", "any order-preserving change"], answer: "new = a × old", why: "Feet to meters is a pure scaling. Adding b would move the zero." },
+        { q: "Which transformation keeps an interval attribute's meaning?", options: ["new = a × old", "new = a × old + b", "any permutation"], answer: "new = a × old + b", why: "Celsius to Fahrenheit is exactly this." },
+      ];
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, scSel, tCtl), h("div", { class: "stage" }, cv, mb, status)), h("h3", {}, "Quiz: classify the survey"), quiz(items));
+    },
+  });
+
+  steps.push({
+    id: "datasets", title: "Discrete or continuous, and kinds of datasets", time: 10,
+    theory: `<h3>More ways to describe data</h3>
+      <ul><li><b>Discrete</b> attributes have a finite or countable set of values (counts, zip codes, words). <b>Continuous</b> attributes are real numbers (temperature, height), stored as floating point with finite precision.</li>
+      <li><b>Asymmetric</b> attributes: only non-zero values matter. Student × course enrollment is 1 for a few courses and 0 for hundreds; two students sharing a 0 tells us nothing.</li>
+      <li>Dataset characteristics: <b>dimensionality</b> (number of attributes; many leads to the curse of dimensionality), <b>sparsity</b> (most entries zero, which can be a blessing for storage), <b>resolution</b> (patterns depend on the scale: hourly vs daily).</li>
+      <li>Types of datasets: <b>record data</b> (our table; transaction data; a data matrix; a sparse document-term matrix), <b>graph data</b> (social networks, molecules, road maps), <b>ordered data</b> (sequential transactions, sequences without time stamps, time series with temporal autocorrelation, spatial data with spatial autocorrelation).</li></ul>`,
+    ask: `<div class='a'>Show the three views with the example buttons, then ask for examples from their own phones: contacts (record), WhatsApp groups (graph), step counter (time series), maps (spatial). Ask which attributes of the survey are discrete (id, major, year, satisfaction, coffee_cups) and which continuous. Before "Two students with no courses", ask how similar two students are who took nothing: simple matching says 100%, Jaccard is 0 ÷ 0. Before "Shuffle the days", ask what changes: mean and sd stay, the lag-1 autocorrelation collapses.</div>`,
+    mount() {
+      const NS = 12, NC = 40, rngM = RNG(31);
+      const perms = Array.from({ length: NS }, () => rngM.shuffle([...Array(NC).keys()]));
+      perms[1] = [perms[0][0], ...perms[1].filter((c) => c !== perms[0][0])];
+      const NN = 14, rngG = RNG(32);
+      const nodes = Array.from({ length: NN }, (_, i) => { const a = (i / NN) * 2 * Math.PI; return [380 + Math.cos(a) * 250 + rngG.normal(0, 16), 140 + Math.sin(a) * 92 + rngG.normal(0, 8)]; });
+      const edges = [], seenE = new Set();
+      while (edges.length < 24) { const i = rngG.int(NN); let j = (i + 1 + rngG.int(3)) % NN; if (rngG() < 0.3) j = rngG.int(NN); if (i === j) continue; const k = Math.min(i, j) + "-" + Math.max(i, j); if (seenE.has(k)) continue; seenE.add(k); edges.push([i, j]); }
+      const rngS = RNG(33); let ar = 0; const STEPS = Array.from({ length: 60 }, () => { ar = 0.85 * ar + rngS.normal(0, 1500); return Math.round(8000 + ar); });
+      const PERM = RNG(34).shuffle([...Array(60).keys()]);
+      let view = "matrix", k = 3, ek = edges.length, shuffled = false, reveal = 60;
+      const cv = canvas(760, 260), mb = metricsBox(), status = statusBox();
+      const cellsFor = (kk) => { const c = new Array(NS * NC).fill(0); perms.forEach((p, s) => p.slice(0, kk).forEach((ci) => (c[s * NC + ci] = 1))); return c; };
+      const target = () => ({ view, cells: cellsFor(k), ek, pos: STEPS.map((_, i) => (shuffled ? PERM[i] : i)), reveal });
+      function drawState(st) {
+        const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H); ctx.font = "12px Public Sans";
+        if (st.view === "matrix") {
+          const x0 = 60, y0 = 34, cw = (W - x0 - 10) / NC, ch = 17;
+          ctx.fillStyle = css("--ink"); ctx.fillText(`${NS} students × ${NC} courses (filled = enrolled). Outlined: students S1 and S2.`, x0, 16);
+          for (let s = 0; s < NS; s++) {
+            ctx.fillStyle = s < 2 ? css("--coral") : css("--muted"); ctx.fillText("S" + (s + 1), 20, y0 + s * ch + 12);
+            for (let c = 0; c < NC; c++) {
+              const a = st.cells[s * NC + c]; ctx.strokeStyle = css("--line"); ctx.strokeRect(x0 + c * cw + 0.5, y0 + s * ch + 0.5, cw - 1, ch - 1);
+              if (a > 0.01) { ctx.globalAlpha = a; ctx.fillStyle = css("--lagoon"); ctx.fillRect(x0 + c * cw + 2, y0 + s * ch + 2, cw - 4, ch - 4); ctx.globalAlpha = 1; }
+            }
+          }
+          ctx.strokeStyle = css("--coral"); ctx.lineWidth = 2; ctx.strokeRect(x0 - 1, y0 - 1, NC * cw + 2, 2 * ch + 2); ctx.lineWidth = 1;
+        } else if (st.view === "graph") {
+          ctx.fillStyle = css("--ink"); ctx.fillText(`Friendships among ${NN} students: nodes and edges, no table rows.`, 10, 16);
+          edges.forEach(([i, j], e) => { const a = clamp(st.ek - e, 0, 1); if (a <= 0) return; ctx.globalAlpha = a; ctx.strokeStyle = css("--lagoon"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(...nodes[i]); ctx.lineTo(...nodes[j]); ctx.stroke(); ctx.globalAlpha = 1; });
+          nodes.forEach(([x, y], i) => { ctx.fillStyle = css("--panel"); ctx.strokeStyle = css("--ink-2"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = css("--ink"); ctx.textAlign = "center"; ctx.fillText("S" + (i + 1), x, y + 4); ctx.textAlign = "left"; });
+        } else {
+          const L = 56, R = W - 12, T = 26, B = H - 26, lo = Math.min(...STEPS) - 300, hi = Math.max(...STEPS) + 300;
+          const X = (p) => L + (p / 59) * (R - L), Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (B - T);
+          ctx.fillStyle = css("--ink"); ctx.fillText("Daily step count, 60 days (color = the real day: blue early, red late)", L, 16);
+          ctx.fillStyle = css("--muted"); for (let g = 0; g <= 4; g++) { const v = lo + (g / 4) * (hi - lo); ctx.fillText(fmt(v, 0), 4, Y(v) + 4); } ctx.fillText("position in the series", R - 140, H - 8);
+          const shown = STEPS.map((v, i) => [st.pos[i], v, i]).filter((p) => p[0] <= st.reveal + 1e-9).sort((a, b) => a[0] - b[0]);
+          ctx.strokeStyle = css("--muted"); ctx.lineWidth = 1; ctx.beginPath(); shown.forEach(([p, v], i) => (i ? ctx.lineTo(X(p), Y(v)) : ctx.moveTo(X(p), Y(v)))); ctx.stroke();
+          shown.forEach(([p, v, i]) => { ctx.fillStyle = `hsl(${230 - (i / 59) * 230}, 70%, 60%)`; ctx.beginPath(); ctx.arc(X(p), Y(v), 4, 0, 7); ctx.fill(); });
+        }
+      }
+      const morph = morpher(drawState, 700);
+      function stats() {
+        if (view === "matrix") {
+          const c = cellsFor(k), zeros = c.filter((x) => !x).length, s1 = c.slice(0, NC), s2 = c.slice(NC, 2 * NC);
+          let both1 = 0, either = 0, match = 0; for (let i = 0; i < NC; i++) { if (s1[i] && s2[i]) both1++; if (s1[i] || s2[i]) either++; if (s1[i] === s2[i]) match++; }
+          const jac = either ? both1 / either : NaN;
+          mb.update([{ k: "Cells that are 0", v: (100 * zeros) / c.length, d: 0, u: "%" }, { k: "S1 vs S2: simple matching", v: (100 * match) / NC, d: 0, u: "%" }, { k: "S1 vs S2: Jaccard", v: either ? 100 * jac : NaN, d: 0, u: "%", cls: either ? "" : "bad" }]);
+          status.set(either ? "" : "Neither S1 nor S2 takes any course. Simple matching calls them 100% similar because they share 40 zeros. Jaccard divides 0 shared courses by 0 courses taken: 0 ÷ 0 is <b>undefined</b>. For asymmetric attributes, shared zeros are not evidence of similarity.");
+        } else if (view === "graph") {
+          const E = Math.round(ek), deg = new Array(NN).fill(0); edges.slice(0, E).forEach(([i, j]) => { deg[i]++; deg[j]++; });
+          mb.update([{ k: "Nodes", v: NN, d: 0 }, { k: "Edges", v: E, d: 0 }, { k: "Average degree", v: (2 * E) / NN, d: 1 }, { k: "Most friends", v: Math.max(...deg), d: 0 }]);
+          status.set("");
+        } else {
+          const seq = new Array(60); STEPS.forEach((v, i) => (seq[shuffled ? PERM[i] : i] = v)); const m = mean(seq);
+          let num = 0, den = 0; seq.forEach((v, i) => { den += (v - m) ** 2; if (i < 59) num += (v - m) * (seq[i + 1] - m); });
+          mb.update([{ k: "Mean steps", v: m, d: 0 }, { k: "Std dev", v: sd(seq), d: 0 }, { k: "Lag-1 autocorrelation", v: num / den, d: 2, cls: num / den > 0.5 ? "good" : "bad" }]);
+          status.set(shuffled ? "Same 60 values, same mean, same sd: as a set of records nothing changed. But the order was information. Neighboring days are no longer alike, so the autocorrelation collapses." : "", "info");
+        }
+      }
+      function redraw(o = {}) { stats(); return morph(target(), o); }
+      const kCtl = range({ label: "Courses per student", min: 0, max: 8, step: 1, value: k, onchange: (v) => { k = v; redraw(); } });
+      const eCtl = range({ label: "Friendships drawn", min: 0, max: edges.length, step: 1, value: ek, onchange: (v) => { ek = v; redraw(); } });
+      const sCtl = check({ label: "Shuffle the days", value: shuffled, onchange: (v) => { shuffled = v; redraw({ ms: 1300 }); } });
+      const vSel = select({ label: "View", options: [{ value: "matrix", label: "Record data: sparse enrollment matrix" }, { value: "graph", label: "Graph data: friendships" }, { value: "series", label: "Ordered data: daily steps" }], value: view, onchange: (v) => { view = v; showCtls(); redraw({ instant: true }); } });
+      const showCtls = () => { kCtl.style.display = view === "matrix" ? "" : "none"; eCtl.style.display = view === "graph" ? "" : "none"; sCtl.style.display = view === "series" ? "" : "none"; };
+      showCtls(); redraw();
+      const ex = examples([
+        { label: "Enrollment matrix", kind: "example", note: "Courses fill in as each student enrolls in up to 4 of 40. Even then 90% of the cells are 0: the matrix is <b>sparse</b>, and the 1s are what matter (<b>asymmetric</b> binary attributes). Compare simple matching (counts shared zeros) with Jaccard (ignores them).", run: async () => { vSel.apply("matrix"); kCtl.apply(1); await sleep(700); await kCtl.animateTo(4, 1800); await sleep(500); } },
+        { label: "Friendship graph", kind: "example", note: "Edges appear one by one. <b>Graph data</b>: the information is in the links between objects, not in a row of attribute values.", run: async () => { vSel.apply("graph"); eCtl.apply(0); await sleep(500); await eCtl.animateTo(edges.length, 2600); } },
+        { label: "Daily steps over time", kind: "example", note: "The series is drawn day by day. <b>Ordered data</b>: neighboring days look alike (temporal autocorrelation), so the order itself is information.", run: async () => { vSel.apply("series"); sCtl.apply(false); reveal = 0; redraw({ instant: true }); await tween(2200, (t) => { reveal = 59 * t; redraw({ instant: true }); }); reveal = 60; redraw({ instant: true }); } },
+        { label: "Two students with no courses", kind: "edge", note: "Everybody's courses disappear one at a time until S1 and S2 take nothing. Watch the two similarity boxes at the end.", run: async () => { vSel.apply("matrix"); await sleep(300); await kCtl.animateTo(0, 1800); await sleep(500); } },
+        { label: "Shuffle the days", kind: "edge", note: "Every day flies to a random position. The values are identical, only their order changes.", run: async () => { vSel.apply("series"); reveal = 60; if (shuffled) { sCtl.apply(false); await sleep(1400); } sCtl.apply(true); await sleep(1500); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, vSel, kCtl, eCtl, sCtl), h("div", { class: "stage" }, cv, mb, status)), h("h3", {}, "Quiz"),
+        quiz([
+          { q: "coffee_cups", options: ["Discrete", "Continuous"], answer: "Discrete", why: "A count." },
+          { q: "sleep_hours", options: ["Discrete", "Continuous"], answer: "Continuous", why: "Any real value, recorded with one decimal." },
+          { q: "student × course enrollment matrix", options: ["Symmetric binary", "Asymmetric binary"], answer: "Asymmetric binary", why: "Shared zeros (courses neither took) are not informative." },
+          { q: "Friendships between students", options: ["Record data", "Graph data", "Ordered data"], answer: "Graph data", why: "Nodes and edges." },
+          { q: "A student's daily step counts for a year", options: ["Record data", "Graph data", "Ordered data"], answer: "Ordered data", why: "Time series: nearby days are correlated (temporal autocorrelation)." },
+          { q: "Word counts of 10,000 news articles over 50,000 words", options: ["Dense data matrix", "Sparse data matrix"], answer: "Sparse data matrix", why: "Each article uses a tiny fraction of the vocabulary." },
+        ]));
+    },
+  });
+
+  steps.push({
+    id: "measurement", title: "Measurement error: precision, bias, accuracy", time: 10,
+    theory: `<h3>Why collected data is never the truth</h3>
+      <p>Errors come from the <b>measurement</b> process (a sensor, a questionnaire, a human typing) and from <b>data collection</b> (objects omitted, or included by mistake). Errors can be systematic or random. If we measure the same quantity repeatedly:</p>
+      <ul><li><b>Precision</b>: how close repeated measurements are to each other (their standard deviation).</li>
+      <li><b>Bias</b>: the systematic gap between the mean of the measurements and the true value.</li>
+      <li><b>Accuracy</b>: closeness to the true value, measured by the mean squared error. MSE = bias² + variance.</li></ul>
+      <p><b>Noise</b> is the random component of measurement error. Deterministic distortions (a streak in the same place on every photo) are <b>artifacts</b>. Signal processing fights noise; data mining mostly tries to use algorithms that are robust to it.</p>`,
+    ask: `<div class='a'>Ask: "A bathroom scale that always reads 2 kg too much: precise or accurate?" (precise, biased; "Precise but biased"). "A scale that varies ±3 kg but averages right?" (unbiased, imprecise; "Unbiased but noisy"). Which is easier to fix? Bias: subtract it ("Calibrate"). Noise can only be averaged ("Average repeated readings": averaging 16 readings cuts the sd from 0.97 to 0.25 h and the MSE from 1.28 to 0.30, while the bias stays near 0.5 h). The zero-noise edge case shows perfect precision (sd 0) with an MSE of exactly bias² = 1.00.</div>`,
+    mount() {
+      let bias = 0.5, noise = 0.4, reps = 1, shown = 400; const TRUE = 7.0, N = 400, RMAX = 16;
+      const rng = RNG(5); const Z = Array.from({ length: N }, () => Array.from({ length: RMAX }, () => [rng.normal(), rng.normal()]));
+      const cv = canvas(760, 280), mb = metricsBox(), status = statusBox();
+      function shots() { return Z.map((zs) => { let x = 0, y = 0; for (let r = 0; r < reps; r++) { x += zs[r][0]; y += zs[r][1]; } return [TRUE + bias + (noise * x) / reps, (noise * y) / reps]; }); }
+      function redraw() {
+        const k = clamp(Math.round(shown), 1, N), S = shots().slice(0, k), xs = S.map((p) => p[0]);
+        const m = mean(xs), s = sd(xs), mse = mean(xs.map((x) => (x - TRUE) ** 2));
+        const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height); ctx.font = "12px Public Sans";
+        const cx = 140, cy = 150, PX = 52;
+        ctx.save(); ctx.beginPath(); ctx.rect(0, 22, 282, 258); ctx.clip();
+        [2.5, 2, 1.5, 1, 0.5].forEach((r, i) => { ctx.fillStyle = i % 2 ? css("--paper") : css("--panel"); ctx.strokeStyle = css("--line"); ctx.beginPath(); ctx.arc(cx, cy, r * PX, 0, 7); ctx.fill(); ctx.stroke(); });
+        ctx.globalAlpha = 0.55; ctx.fillStyle = css("--lagoon"); S.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(cx + (x - TRUE) * PX, cy + y * PX, 2.6, 0, 7); ctx.fill(); }); ctx.globalAlpha = 1;
+        ctx.strokeStyle = css("--mint-2"); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cx - 9, cy); ctx.lineTo(cx + 9, cy); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx, cy + 9); ctx.stroke();
+        ctx.strokeStyle = css("--coral"); ctx.beginPath(); ctx.arc(cx + (m - TRUE) * PX, cy, 7, 0, 7); ctx.stroke(); ctx.lineWidth = 1;
+        ctx.restore(); ctx.fillStyle = css("--ink"); ctx.fillText("Target: rings every 0.5 h; + true value, ○ mean", 4, 14);
+        drawHist(cv, histState(xs, { min: 4, max: 10, bins: 40, title: `${k} measurements of a student who really sleeps 7.0 h`, lines: [{ x: TRUE, color: css("--mint-2"), label: "true 7.0 h" }, { x: m, color: css("--coral"), label: `mean ${fmt(m, 2)}`, dy: 14, dash: [4, 3] }] }), { x: 290, y: 0, w: 470, h: 280 });
+        mb.update([{ k: "Precision (sd)", v: s }, { k: "Bias (mean − true)", v: m - TRUE }, { k: "Accuracy (MSE)", v: mse, d: 3 }, { k: "bias² + variance", v: (m - TRUE) ** 2 + s * s, d: 3 }]);
+        status.set(noise > 0 ? "" : Math.abs(bias) < 1e-9 ? "Noise 0 and bias 0: every reading is exactly 7.0 h, MSE 0. A perfect instrument; real ones never get here." : `Noise is 0: all ${k} readings are identical, so the spread is 0, perfect precision. The bias is still ${fmt(bias, 1)} h, so MSE = bias² = ${fmt(bias * bias, 2)}. Precision is not accuracy.`);
+      }
+      async function fire(ms = 1500) { await tween(ms, (t) => { shown = 1 + (N - 1) * t; redraw(); }); shown = N; redraw(); }
+      const bCtl = range({ label: "Bias (systematic error, h)", min: -1.5, max: 1.5, step: 0.1, value: bias, fmt: (v) => v.toFixed(1), onchange: (v) => { bias = v; redraw(); } });
+      const nCtl = range({ label: "Noise (random error, sd)", min: 0, max: 1.5, step: 0.05, value: noise, fmt: (v) => v.toFixed(2), onchange: (v) => { noise = v; redraw(); } });
+      const rCtl = range({ label: "Readings averaged per measurement", min: 1, max: RMAX, step: 1, value: reps, onchange: (v) => { reps = v; redraw(); } });
+      redraw();
+      const setup = async (b, n, r = 1) => { await rCtl.animateTo(r, 300); await bCtl.animateTo(b, 700); await nCtl.animateTo(n, 700); };
+      const ex = examples([
+        { label: "Precise but biased", kind: "example", note: "The sliders move to bias 1.0 and noise 0.2, then 400 readings are fired at the target. They land in a tight cluster, but 1 h to the right of the center: <b>precise, not accurate</b>.", run: async () => { await setup(1.0, 0.2); await fire(); } },
+        { label: "Unbiased but noisy", kind: "example", note: "Bias 0, noise 1.0. The readings center on the truth but scatter widely: <b>unbiased, imprecise</b>. Here the MSE is almost all variance.", run: async () => { await setup(0, 1.0); await fire(); } },
+        { label: "Calibrate", kind: "example", note: "Start from the biased instrument, then slide the bias back to 0. The whole cloud shifts onto the center while its spread stays the same: subtracting a known bias is a complete fix.", run: async () => { await setup(1.0, 0.2); await fire(900); await sleep(400); await bCtl.animateTo(0, 1800); } },
+        { label: "Average repeated readings", kind: "example", note: "Bias 0.5, noise 1.0, then each measurement becomes the mean of 1, 2, ... 16 readings. The cloud shrinks around its own center (the sd falls from 0.97 to 0.25 h, close to the factor √16 = 4), but that center stays about 0.5 h off. Averaging fixes noise, never bias.", run: async () => { await setup(0.5, 1.0, 1); await sleep(400); await rCtl.animateTo(16, 2600); } },
+        { label: "Zero noise", kind: "edge", note: "Noise goes to exactly 0 with bias 1.0. All 400 readings land on one point: the histogram is a single bar and the sd is 0.", run: async () => { await setup(1.0, 0); await fire(); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, bCtl, nCtl, rCtl), h("div", { class: "stage" }, cv, mb, status)));
+    },
+  });
+
+  steps.push({
+    id: "outliers", title: "Noise vs outliers", time: 15,
+    theory: `<h3>Outliers are legitimate, noise is not</h3>
+      <p><b>Outliers</b> are data objects or values considerably different from most of the others. They are not noise: a student who really sleeps 4 hours is a real, interesting record (anomaly detection lives on them). But "sleep = 70 hours" is a data-entry error that will wreck any average. Common detection rules:</p>
+      <ul><li>z-score: flag |x − mean| &gt; k × sd (fragile: the outlier inflates the sd that is supposed to catch it).</li>
+      <li>IQR rule: flag x outside [Q1 − 1.5 IQR, Q3 + 1.5 IQR] (robust: quartiles barely move).</li></ul>
+      <p>Watch how the <b>mean</b> runs after the outliers while the <b>median</b> stays put. Robust statistics are the first line of defense.</p>`,
+    ask: `<div class='a'>Before "Mean runs, median stays", ask where the mean will end up with 20 injected errors: 7 of them land in sleep_hours and drag the mean from 6.50 to 8.08 h, while the median stays at 6.50. "Masking: the z-rule": the |z| &gt; 3 upper fence runs from 9.45 h to 38.95 h because the errors inflate the sd. The errors (60 h or more) are still caught, but a 30 h error would now hide, and the one real student flagged at 0 errors is no longer flagged. "IQR fences stay put": the fences move from 3.85 to 9.05 h to 3.55 to 9.55 h. Then ask: "Should we delete the student who sleeps 4 h?" No, that is a real value. "An outlier that is a real value" shows |z| &gt; 2 flagging 14 real students with no errors at all. Deleting outliers blindly throws away the anomalies we might be looking for.</div>`,
+    mount() {
+      let nOut = 5, rule = "z3", constant = false;
+      const BASE7 = CLEAN.map((r) => ({ ...r, sleep_hours: 7.0 }));
+      const cv = canvas(760, 250), mb = metricsBox(), status = statusBox(), tbl = h("div");
+      const morph = morpher((st) => drawHist(cv, st), 500);
+      function redraw() {
+        const rows = messy(constant ? BASE7 : CLEAN, { missing: 0, outliers: nOut, typos: 0, duplicates: 0, noise: 0 }, 1);
+        const v = col(rows, "sleep_hours"), m = avg(v), s = sd(v), md = median(v);
+        const so = v.slice().sort((a, b) => a - b), q1 = so[Math.floor(so.length * 0.25)], q3 = so[Math.floor(so.length * 0.75)], iqr = q3 - q1;
+        let lo = NaN, hi = NaN;
+        if (rule === "z2" || rule === "z3") { const kk = rule === "z2" ? 2 : 3; if (s > 0) { lo = m - kk * s; hi = m + kk * s; } } else if (rule === "iqr") { lo = q1 - 1.5 * iqr; hi = q3 + 1.5 * iqr; }
+        const flag = (x) => isFinite(lo) && (x < lo || x > hi);
+        const flagged = rows.filter((r) => r.sleep_hours != null && flag(r.sleep_hours));
+        const errors = v.filter((x) => x > 20).length, caught = flagged.filter((r) => r.sleep_hours > 20).length, realOnes = flagged.length - caught;
+        const st = histState(v, { min: 3, max: 90, bins: 60, title: constant ? "sleep_hours: every real answer is 7.0, plus the injected errors" : "sleep_hours with injected data-entry errors (red bars = flagged)", lines: [{ x: m, color: css("--coral"), label: `mean ${fmt(m, 2)}` }, { x: md, color: css("--mint-2"), label: `median ${fmt(md, 2)}`, dy: 14 }, { x: lo, color: css("--ink-2"), label: "lower fence", dash: [3, 3], dy: 28 }, { x: hi, color: css("--ink-2"), label: "upper fence", dash: [3, 3], dy: 42 }] });
+        st.binColors = st.bins.map((_, i) => { const a = 3 + (i * 87) / 60, b = a + 87 / 60; return v.some((x) => x >= a && x < b && flag(x)) ? css("--coral") : css("--lagoon"); });
+        morph(st);
+        mb.update([{ k: "Mean", v: m, cls: nOut ? "bad" : "" }, { k: "Median", v: md, cls: "good" }, { k: "Std dev", v: s }, { k: "Flagged by rule", v: flagged.length, d: 0 }, { k: "...of which real students", v: realOnes, d: 0, cls: realOnes ? "bad" : "" }, { k: "Errors missed", v: rule === "none" ? errors : errors - caught, d: 0, cls: errors - caught ? "bad" : "good" }]);
+        status.set(rule.startsWith("z") && !(s > 0) ? "Every value is 7.0, so the sd is 0 and z = (x − mean) ÷ sd divides by zero. The z-score is <b>undefined</b> and the z-rule cannot flag anything. Add one error and it works again." : rule === "iqr" && iqr === 0 ? `IQR = 0: both fences sit at ${fmt(q1, 1)}, so the rule flags every value that differs from ${fmt(q1, 1)} at all.` : "");
+        tbl.innerHTML = ""; tbl.append(h("h3", {}, `Flagged rows (${flagged.length})`), table(flagged, ["id", "major", "sleep_hours", "coffee_cups", "commute_min"], 8));
+      }
+      const nCtl = range({ label: "Injected data-entry errors", min: 0, max: 20, step: 1, value: nOut, onchange: (v) => { nOut = v; redraw(); } });
+      const rSel = select({ label: "Detection rule", options: [{ value: "none", label: "none" }, { value: "z2", label: "|z| > 2" }, { value: "z3", label: "|z| > 3" }, { value: "iqr", label: "IQR × 1.5" }], value: rule, onchange: (v) => { rule = v; redraw(); } });
+      const cCtl = check({ label: "Edge case: every student answered 7.0", value: constant, onchange: (v) => { constant = v; redraw(); } });
+      redraw();
+      const prep = async (r, n, c = false) => { if (cCtl.get() !== c) cCtl.apply(c); if (rSel.get() !== r) rSel.apply(r); await nCtl.animateTo(n, 500); await sleep(400); };
+      const ex = examples([
+        { label: "Mean runs, median stays", kind: "example", note: "Errors are injected one at a time; each lands in sleep, coffee or commute at random, and 7 of the 20 hit sleep_hours (60 h or more). The red mean line jumps right with each one, from 6.50 to 8.08 h; the green median stays at 6.50.", run: async () => { await prep("none", 0); await nCtl.animateTo(20, 3200); } },
+        { label: "Masking: the z-rule", kind: "example", note: "With |z| &gt; 3, inject up to 20 errors. Each error inflates the sd, so the upper fence runs away to the right, from 9.45 h to 38.95 h. These errors are extreme enough to stay caught, but a 30 h error would now hide inside the fence, and the one real student flagged at the start drops out of the table.", run: async () => { await prep("z3", 0); await nCtl.animateTo(20, 3200); } },
+        { label: "IQR fences stay put", kind: "example", note: "Same errors, IQR rule. The quartiles hardly move, so the fences shift by less than 0.5 h and every sleep error is caught. The price: a few real students also sit outside the fences (4 with no errors injected).", run: async () => { await prep("iqr", 0); await nCtl.animateTo(20, 3200); } },
+        { label: "An outlier that is a real value", kind: "edge", note: "No errors at all, rule |z| &gt; 2. The rule still flags 14 students: they are real short and long sleepers. Deleting them throws away true information.", run: async () => { await prep("z2", 0); pulse(tbl); } },
+        { label: "All values identical", kind: "edge", note: "Every real answer becomes 7.0, so the variance is 0. Then errors are added until the first one lands in sleep_hours (at 5 errors).", run: async () => { await prep("z3", 0, true); await sleep(2200); await nCtl.animateTo(5, 1800); await sleep(400); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, nCtl, rSel, cCtl), h("div", { class: "stage" }, cv, mb, status, tbl)));
+    },
+  });
+
+  steps.push({
+    id: "missing", title: "Missing values", time: 15,
+    theory: `<h3>Eliminate, estimate, or ignore</h3>
+      <p>Values go missing because they were not collected or not applicable. The options from the lecture: <b>eliminate</b> the objects or attributes, <b>estimate</b> the missing values (mean, median, a model), or <b>ignore</b> them in the analysis (compute each statistic from the available values).</p>
+      <p>The danger is <i>why</i> a value is missing. If students who sleep little skip the sleep question, every simple strategy is biased: dropping them, or filling in the class mean, both make the class look better rested than it is. Toggle "missing not at random" and compare the estimated mean with the truth. Also watch the correlation between study hours and GPA when we impute the mean: imputed points sit on a flat line and dilute the pattern.</p>`,
+    ask: `<div class='a'>Ask: "What mean do you expect after mean imputation?" (unchanged, by construction; but the variance shrinks and the correlation drops: "Mean imputation" at 30% missing takes corr(study, gpa) from 0.76 to 0.65, and "More missing, flatter cloud" ends at 0.53 with 60% missing). Then run "Not at random" and ask which strategy recovers the true mean of 6.50 h. None: at 30% missing the estimates are 6.64 (eliminate), 6.70 (mean), 6.68 (median) and 6.70 (ignore). You need a model of the missingness. The edge case "A column entirely missing" shows that no strategy can recover an attribute that was never observed.</div>`,
+    mount() {
+      let rate = 0.2, biased = false, strategy = "drop", allMiss = false;
+      const cv = canvas(760, 270), cv2 = canvas(760, 170), mb = metricsBox(), status = statusBox();
+      const trueMean = avg(col(CLEAN, "sleep_hours")), trueCorr = corr(CLEAN, "study_hours", "gpa");
+      const XR = [0, 46], YR = [1.4, 4.1], N = CLEAN.length;
+      function compute() {
+        const rows = messy(CLEAN, { missing: rate, missingBiased: biased, outliers: 0, typos: 0, duplicates: 0, noise: 0 }, 2);
+        const rng = RNG(9); rows.forEach((r) => { if (rng() < rate) r.study_hours = null; });
+        if (allMiss) rows.forEach((r) => (r.sleep_hours = null));
+        const obsS = col(rows, "sleep_hours"), obsT = col(rows, "study_hours");
+        const fillS = strategy === "mean" ? avg(obsS) : strategy === "median" ? median(obsS) : NaN, fillT = strategy === "mean" ? avg(obsT) : strategy === "median" ? median(obsT) : NaN;
+        const kept = rows.map((r) => strategy !== "drop" || (r.sleep_hours != null && r.study_hours != null));
+        const fixed = rows.map((r) => (strategy === "mean" || strategy === "median" ? { ...r, sleep_hours: r.sleep_hours ?? (isFinite(fillS) ? fillS : null), study_hours: r.study_hours ?? fillT } : r)).filter((_, i) => kept[i]);
+        return { rows, kept, fixed, fillS, fillT };
+      }
+      function drawSc(st) {
+        const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H); ctx.font = "12px Public Sans";
+        const L = 44, R = W - 12, T = 22, B = H - 28, X = (x) => L + ((x - XR[0]) / (XR[1] - XR[0])) * (R - L), Y = (y) => T + (1 - (y - YR[0]) / (YR[1] - YR[0])) * (B - T);
+        ctx.fillStyle = css("--muted"); [0, 10, 20, 30, 40].forEach((x) => ctx.fillText(x, X(x) - 6, H - 10)); [1.5, 2, 2.5, 3, 3.5, 4].forEach((y) => ctx.fillText(fmt(y, 1), 8, Y(y) + 4)); ctx.fillText("study_hours", R - 70, H - 10); ctx.fillText("gpa", 8, T - 6);
+        CLEAN.forEach((r, i) => { if (st.ghost[i] < 0.02) return; ctx.globalAlpha = 0.35 * st.ghost[i]; ctx.strokeStyle = css("--coral"); ctx.beginPath(); ctx.arc(X(r.study_hours), Y(r.gpa), 3.5, 0, 7); ctx.stroke(); });
+        ctx.globalAlpha = 1;
+        if (isFinite(st.fx)) { ctx.strokeStyle = css("--coral"); ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(X(st.fx), T); ctx.lineTo(X(st.fx), B); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = css("--coral"); ctx.fillText(`imputed study_hours = ${fmt(st.fx, 1)}`, X(st.fx) + 6, T + 10); }
+        let visible = 0;
+        for (let i = 0; i < N; i++) { if (st.al[i] < 0.02) continue; visible++; ctx.globalAlpha = st.al[i] * (st.red[i] > 0.5 ? 0.9 : 0.5); ctx.fillStyle = st.red[i] > 0.5 ? css("--coral") : css("--lagoon"); ctx.beginPath(); ctx.arc(X(st.xs[i]), Y(st.ys[i]), 3.6, 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1; ctx.fillStyle = css("--ink"); ctx.fillText(st.title, L, 14);
+        if (!visible) { ctx.fillStyle = css("--coral"); ctx.textAlign = "center"; ctx.fillText("No rows left to plot.", (L + R) / 2, (T + B) / 2); ctx.textAlign = "left"; }
+      }
+      const morphSc = morpher(drawSc, 900), morphH = morpher((st) => drawHist(cv2, st), 700);
+      function redraw(o = {}) {
+        const { rows, kept, fixed, fillT } = compute();
+        const xs = [], ys = [], al = [], red = [], ghost = [];
+        rows.forEach((r, i) => {
+          const miss = r.study_hours == null, imputed = miss && (strategy === "mean" || strategy === "median"), vis = kept[i] && (!miss || imputed);
+          xs.push(vis ? (imputed ? fillT : r.study_hours) : CLEAN[i].study_hours); ys.push(r.gpa); al.push(vis ? 1 : 0); red.push(imputed ? 1 : 0); ghost.push(miss ? 1 : 0);
+        });
+        const names = { drop: "eliminate rows", mean: "estimate with the mean", median: "estimate with the median", ignore: "ignore (available values)" };
+        morphSc({ xs, ys, al, red, ghost, fx: strategy === "mean" || strategy === "median" ? fillT : NaN, title: `study_hours vs gpa after "${names[strategy]}" (red = imputed, faint ring = the hidden true value)` }, o);
+        const sv = col(fixed, "sleep_hours"), est = avg(sv), c = corr(fixed, "study_hours", "gpa");
+        morphH(histState(sv, { min: 3.45, max: 10.05, bins: 33, title: "sleep_hours used for the estimate", emptyMsg: "No sleep values at all: nothing to plot.", lines: [{ x: trueMean, color: css("--mint-2"), label: `true mean ${fmt(trueMean, 2)}` }, { x: est, color: css("--coral"), label: `estimate ${fmt(est, 2)}`, dash: [4, 3], dy: 14 }] }), o);
+        mb.update([{ k: "True mean sleep", v: trueMean }, { k: "Estimated mean sleep", v: est, cls: isFinite(est) && Math.abs(est - trueMean) <= 0.1 ? "good" : "bad" }, { k: "Rows kept", v: fixed.length, d: 0 }, { k: "True corr(study, gpa)", v: trueCorr }, { k: "Estimated corr", v: c, cls: isFinite(c) && Math.abs(c - trueCorr) <= 0.08 ? "good" : "bad" }]);
+        status.set(!allMiss ? "" : strategy === "drop" ? "Every row is missing sleep_hours, so eliminating incomplete rows deletes the whole dataset: 0 rows, nothing left to estimate. When a whole attribute is missing, eliminate the <b>attribute</b>, not the objects." : strategy === "ignore" ? "Ignoring missing values leaves 0 sleep values. The mean of no values is 0 ÷ 0: <b>undefined</b>. No strategy can recover an attribute that was never observed." : "There is no observed sleep value to compute a mean or median from, so there is nothing to fill in. The estimate is <b>undefined</b>. Drop the attribute and collect it again.");
+      }
+      const rCtl = range({ label: "Missing rate", min: 0, max: 0.6, step: 0.05, value: rate, fmt: (v) => fmt(100 * v, 0) + "%", onchange: (v) => { rate = v; redraw(); } });
+      const bCtl = check({ label: "Missing not at random (short sleepers skip the question)", value: biased, onchange: (v) => { biased = v; redraw(); } });
+      const aCtl = check({ label: "Edge case: the sleep question was removed (100% missing)", value: allMiss, onchange: (v) => { allMiss = v; redraw(); } });
+      const sSel = select({ label: "Strategy", options: [{ value: "drop", label: "Eliminate rows with a missing value" }, { value: "mean", label: "Estimate with the mean" }, { value: "median", label: "Estimate with the median" }, { value: "ignore", label: "Ignore (use available values)" }], value: strategy, onchange: (v) => { strategy = v; redraw(); } });
+      redraw();
+      const prep = async (r, b = false, a = false) => { if (aCtl.get() !== a) aCtl.apply(a); if (bCtl.get() !== b) bCtl.apply(b); await rCtl.animateTo(r, 600); };
+      const cycle = async (list, ms = 1700) => { for (const s of list) { sSel.apply(s); await sleep(ms); } };
+      const ex = examples([
+        { label: "Mean imputation: dots fly to the mean", kind: "example", note: "30% of study_hours go missing. First they are simply ignored (hidden). Then every missing value is replaced by the mean: the red dots fly from their hidden true position to one vertical line. The cloud gets a flat stripe and the correlation drops.", run: async () => { await prep(0.3); sSel.apply("ignore"); await sleep(1300); sSel.apply("mean"); await sleep(1600); } },
+        { label: "More missing, flatter cloud", kind: "example", note: "Mean imputation stays on while the missing rate glides from 0% to 60%. More and more points join the stripe, the sleep histogram grows one tall spike, and the correlation keeps falling.", run: async () => { await prep(0, false); sSel.apply("mean"); await sleep(600); await rCtl.animateTo(0.6, 3000); } },
+        { label: "Not at random: no strategy wins", kind: "example", note: "Short sleepers now skip the question. The strategies are tried one after another; watch the dashed estimate line in the sleep histogram stay to the right of the true mean every time.", run: async () => { await prep(0.3, true); await cycle(["drop", "mean", "median", "ignore"]); } },
+        { label: "A column entirely missing", kind: "edge", note: "The sleep question was removed from the form, so every sleep value is missing. The strategies are tried one after another.", run: async () => { await prep(0.3, false, true); await cycle(["drop", "mean", "ignore"], 2200); } },
+        { label: "0% missing", kind: "edge", note: "The missing rate goes to exactly 0. Now the four strategies are tried: nothing moves, because there is nothing to eliminate, estimate or ignore. All of them give the true values.", run: async () => { await prep(0.3); await rCtl.animateTo(0, 1500); await cycle(["drop", "mean", "median", "ignore"], 1000); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, rCtl, bCtl, aCtl, sSel), h("div", { class: "stage" }, cv, mb, status, cv2)));
+    },
+  });
+
+  steps.push({
+    id: "duplicates", title: "Inconsistent values and duplicates", time: 10,
+    theory: `<h3>The same thing written five ways</h3>
+      <p><b>Inconsistent values</b>: "CS", "cs", "Comp Sci" and "C.S." are one major pretending to be four. Group counts, one-hot encodings and joins all break. The fix is a standardization step: trim, lower-case, map synonyms to a canonical label. Some fields carry a checksum (IBAN, ISBN) that catches typos and digit permutations automatically.</p>
+      <p><b>Duplicates</b>: a student submits the survey twice, once with a slightly different commute. Deduplicating on the identifier is usually right, but simply deleting one copy is not always valid: the two copies may hold different, both correct, pieces of information (an old and a new address). Decide which record wins, or merge them.</p>`,
+    ask: `<div class='a'>Ask: "How many CS students are there?" with typos at 40% and 30 duplicates: the naive count of the label "CS" is 36, the true count is 64. Standardizing gives 65 (one CS student submitted twice), deduplicating brings it back to 64. Then ask how they would find duplicates if the id was also missing (match on several attributes, fuzzy matching). "Same id, different answers": of the 28 duplicated ids, 15 disagree on commute_min, so "which copy wins?" is a real question.</div>`,
+    mount() {
+      let typos = 0.3, dups = 15, fix = false, dedupe = false;
+      const ALL = MAJORS.flatMap((m) => [m, ...MAJOR_TYPOS[m]]);
+      const cv = canvas(760, 210), mb = metricsBox(), chips = h("div", { class: "legend" }), pairs = h("div"), status = statusBox();
+      const W = cv.width, BASE = 178, TOPH = 140, trueCS = CLEAN.filter((r) => r.major === "CS").length;
+      function layout(counts) {
+        const segs = ALL.map(() => [40, 0, 0, 0]), cols = [];
+        if (!fix) {
+          const labs = ALL.filter((l) => counts[l]).sort((a, b) => counts[b] - counts[a] || ALL.indexOf(a) - ALL.indexOf(b));
+          const bw = Math.min(62, (W - 50) / Math.max(1, labs.length));
+          labs.forEach((l, i) => { const x = 40 + i * bw; segs[ALL.indexOf(l)] = [x, bw - 6, 0, counts[l]]; cols.push({ x, w: bw - 6, label: vis(l), total: counts[l] }); });
+          ALL.forEach((l, j) => { if (!counts[l]) { const c = labs.indexOf(canon(l)); segs[j] = [c >= 0 ? 40 + c * bw : 40, bw - 6, 0, 0]; } });
+        } else {
+          const tot = {}; ALL.forEach((l) => (tot[canon(l)] = (tot[canon(l)] || 0) + (counts[l] || 0)));
+          const ms = MAJORS.slice().sort((a, b) => tot[b] - tot[a]), bw = 120;
+          ms.forEach((m, i) => { const x = 70 + i * bw; let y0 = 0; ALL.filter((l) => canon(l) === m).forEach((l) => { const c = counts[l] || 0; segs[ALL.indexOf(l)] = [x, bw - 40, y0, c]; y0 += c; }); cols.push({ x, w: bw - 40, label: m, total: tot[m] }); });
+        }
+        return { segs, cols, ymax: Math.max(1, ...cols.map((c) => c.total)) };
+      }
+      function draw(st) {
+        const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, W, cv.height); ctx.font = "12px Public Sans"; const sc = TOPH / st.ymax;
+        st.segs.forEach(([x, w, y0, hh], j) => { if (hh < 0.02) return; const variant = !MAJORS.includes(ALL[j]); ctx.fillStyle = variant ? css("--coral") : css("--lagoon"); ctx.fillRect(x, BASE - (y0 + hh) * sc, w, hh * sc); ctx.strokeStyle = css("--panel"); ctx.strokeRect(x, BASE - (y0 + hh) * sc, w, hh * sc); if (fix && variant && hh * sc > 13) { ctx.fillStyle = "#fff"; ctx.fillText(vis(ALL[j]), x + 4, BASE - y0 * sc - 3); } });
+        ctx.fillStyle = css("--ink"); st.cols.forEach((c) => { ctx.textAlign = "center"; ctx.fillText(c.label, c.x + c.w / 2, BASE + 15); ctx.fillText(fmt(c.total, 0), c.x + c.w / 2, BASE - c.total * sc - 5); ctx.textAlign = "left"; });
+        ctx.fillText(fix ? "Counts per major after standardizing (coral = merged variant spellings)" : "Counts per raw label in 'major' (coral = not a canonical label)", 10, 14);
+      }
+      const morph = morpher(draw, 900);
+      function redraw(o = {}) {
+        const raw = messy(CLEAN, { missing: 0, outliers: 0, typos, duplicates: dups, noise: 0 }, 3);
+        let rows = raw; if (dedupe) { const seen = new Set(); rows = raw.filter((r) => !seen.has(r.id) && seen.add(r.id)); }
+        const counts = {}; rows.forEach((r) => (counts[r.major] = (counts[r.major] || 0) + 1));
+        morph(layout(counts), o);
+        const labels = Object.keys(counts), cs = fix ? labels.filter((l) => canon(l) === "CS").reduce((s, l) => s + counts[l], 0) : counts.CS || 0;
+        mb.update([{ k: "Rows", v: rows.length, d: 0, cls: rows.length !== CLEAN.length ? "bad" : "good" }, { k: "Distinct major labels", v: fix ? new Set(labels.map(canon)).size : labels.length, d: 0, cls: (fix ? new Set(labels.map(canon)).size : labels.length) !== 5 ? "bad" : "good" }, { k: `CS students (true: ${trueCS})`, v: cs, d: 0, cls: cs === trueCS ? "good" : "bad" }]);
+        chips.innerHTML = ""; chips.append(h("span", {}, "Raw labels:"));
+        ALL.filter((l) => counts[l]).forEach((l) => { const c = h("span", { class: "badge" + (MAJORS.includes(l) ? "" : " warn"), "data-l": l }, `"${vis(l)}" ${counts[l]}${fix && !MAJORS.includes(l) ? " → " + canon(l) : ""}`); chips.append(c); });
+        const byId = {}; raw.forEach((r, i) => (byId[r.id] = byId[r.id] || []).push(i));
+        const groups = Object.values(byId).filter((g) => g.length > 1).sort((a, b) => (raw[b[1]].commute_min !== raw[b[0]].commute_min) - (raw[a[1]].commute_min !== raw[a[0]].commute_min));
+        pairs.innerHTML = "";
+        if (groups.length) {
+          const t = h("table", {}, h("tr", {}, ...["id", "copy", "major", "commute_min", "sleep_hours", ""].map((c) => h("th", {}, c))));
+          groups.slice(0, 4).forEach((g) => g.forEach((i, j) => { const r = raw[i], differs = raw[g[0]].commute_min !== raw[g[1]].commute_min, gone = dedupe && j > 0; t.append(h("tr", { style: gone ? "opacity:.45;text-decoration:line-through" : "" }, h("td", {}, r.id), h("td", {}, j + 1), h("td", {}, vis(r.major)), h("td", { style: differs ? `background:${tint("--coral", 30)}` : "" }, r.commute_min), h("td", {}, r.sleep_hours), h("td", {}, gone ? "removed" : j ? "duplicate" : ""))); }));
+          pairs.append(h("h3", {}, `Duplicate submissions: ${groups.length} ids appear more than once`), h("div", { class: "wide" }, t));
+        }
+      }
+      const tCtl = range({ label: "Typo rate in 'major'", min: 0, max: 0.6, step: 0.05, value: typos, fmt: (v) => fmt(100 * v, 0) + "%", onchange: (v) => { typos = v; redraw(); } });
+      const dCtl = range({ label: "Duplicate submissions", min: 0, max: 40, step: 1, value: dups, onchange: (v) => { dups = v; redraw(); } });
+      const fCtl = check({ label: "Standardize labels", value: fix, onchange: (v) => { fix = v; redraw({ ms: 1300 }); } });
+      const xCtl = check({ label: "Remove duplicates (by id)", value: dedupe, onchange: (v) => { dedupe = v; redraw({ ms: 1100 }); } });
+      redraw();
+      const set = (ctl, v) => { if (ctl.get() !== v) ctl.apply(v); };
+      const ex = examples([
+        { label: "Standardize: many spellings, one label", kind: "example", note: "The typo rate rises to 40% and the bar chart splits into many labels. Then 'Standardize labels' is switched on: each coral variant flies onto its canonical major and stacks there.", run: async () => { set(fCtl, false); set(xCtl, false); await tCtl.animateTo(0, 500); await tCtl.animateTo(0.4, 1800); await sleep(800); fCtl.apply(true); await sleep(1600); } },
+        { label: "Remove duplicate submissions", kind: "example", note: "With labels standardized, 30 duplicate submissions are added: the row count climbs past 300. Then deduplication by id shrinks every bar back to the true size.", run: async () => { set(fCtl, true); set(xCtl, false); await dCtl.animateTo(0, 500); await dCtl.animateTo(30, 1800); await sleep(800); xCtl.apply(true); await sleep(1500); } },
+        { label: "Labels that differ only by case or space", kind: "edge", note: "Look at the highlighted chips. \"EE␣\" has a trailing space (shown as ␣): on screen it looks exactly like \"EE\", but to a computer it is a different string, so it gets its own bar. \"cs\" and \"CS\" differ only by case. Trimming and lower-casing fixes both.", run: async () => {
+          set(fCtl, false); await tCtl.animateTo(0.4, 900); await sleep(400);
+          [...chips.querySelectorAll("[data-l]")].filter((c) => { const l = c.getAttribute("data-l"); return l !== l.trim() || (l !== l.toUpperCase() && MAJORS.some((m) => m.toLowerCase() === l.toLowerCase())) || MAJORS.some((m) => m === l.trim() && l !== m); }).forEach((c) => { c.style.outline = `3px solid ${css("--coral")}`; pulse(c); });
+          await sleep(2600); fCtl.apply(true); await sleep(1600);
+        } },
+        { label: "Same id, different answers", kind: "edge", note: "Look at the duplicate table: the copies of one id disagree on commute_min by one minute (red cells). Removing duplicates by id keeps the first copy and strikes the rest out. Which commute was right? Deleting blindly can throw away the correct value; sometimes you must merge or ask.", run: async () => { set(xCtl, false); await dCtl.animateTo(30, 1000); pulse(pairs); await sleep(2400); xCtl.apply(true); pulse(pairs); await sleep(1500); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, tCtl, dCtl, fCtl, xCtl), h("div", { class: "stage" }, cv, mb, chips, status, pairs)));
+    },
+  });
+
+  steps.push({
+    id: "sampling", title: "Aggregation and sampling", time: 15,
+    theory: `<h3>Less data, same answer?</h3>
+      <p><b>Aggregation</b> combines objects: daily transactions into monthly totals, students into majors. It reduces size, changes the scope (trends appear) and stabilizes values (the standard deviation of monthly rainfall is far smaller than of daily rainfall). Qualitative attributes are dropped or counted.</p>
+      <p><b>Sampling</b> picks a subset because the whole is too big. A sample is <b>representative</b> if it has roughly the same properties as the population (its mean is close to the population mean). Strategies: simple random sampling with or without replacement, and <b>stratified</b> sampling, which samples from each group separately so small groups are not lost. Too few samples miss or invent patterns; too many defeat the purpose. <b>Progressive sampling</b> grows the sample until the accuracy curve flattens.</p>`,
+    ask: `<div class='a'>Ask: "With 30 random students, how many Chem majors do you expect?" (about 6: 62 of the 300 are Chem; draw 1 gives 6, smaller samples vary much more). "Stratified keeps every major": at n = 15, draw 1 gives ME and Bio one student each, stratified gives 3 each. Over draws 1 to 20 the smallest major always has at least 3 students from n = 40 without stratification and from n = 15 with it. Then the progressive-sampling curve: the average error is 0.125 h at n = 25 and 0.054 h at n = 100, four times the data for about half the error (1/√n).</div>`,
+    mount() {
+      let n = 30, strat = false, seed = 1, kShown = null;
+      const cvG = canvas(760, 140), cv = canvas(760, 230), cv2 = canvas(760, 200), mb = metricsBox(), status = statusBox();
+      const ORDER = CLEAN.map((_, i) => i).sort((a, b) => MAJORS.indexOf(CLEAN[a].major) - MAJORS.indexOf(CLEAN[b].major) || a - b);
+      const slot = new Map(); ORDER.forEach((idx, j) => slot.set(CLEAN[idx].id, j));
+      const popMean = MAJORS.map((m) => avg(CLEAN.filter((r) => r.major === m).map((r) => r.sleep_hours))), allMean = avg(CLEAN.map((r) => r.sleep_hours));
+      function sample(k, s, st = strat) { const rng = RNG(s); if (!st) return rng.shuffle(CLEAN).slice(0, k); const out = []; MAJORS.forEach((m) => { const g = rng.shuffle(CLEAN.filter((r) => r.major === m)); out.push(...g.slice(0, Math.max(1, Math.round((k * g.length) / CLEAN.length)))); }); return out; }
+      const curves = {};
+      const curve = (st) => curves[st] || (curves[st] = (() => { const pts = []; for (let k = 5; k <= 300; k += 5) { const errs = []; for (let s = 1; s <= 30; s++) errs.push(Math.abs(avg(sample(k, s, st).map((r) => r.sleep_hours)) - allMean)); pts.push([k, mean(errs)]); } return pts; })());
+      function draw(st) {
+        let ctx = cvG.getContext("2d"); ctx.clearRect(0, 0, cvG.width, cvG.height); ctx.font = "12px Public Sans";
+        ctx.fillStyle = css("--ink"); ctx.fillText("The population: 300 students, grouped by major. Lit = in the sample.", 10, 14);
+        ORDER.forEach((idx, j) => { const x = 14 + Math.floor(j / 10) * 24.6, y = 30 + (j % 10) * 10.6, a = st.on[j]; ctx.globalAlpha = 0.22 + 0.78 * a; ctx.fillStyle = MAJOR_COLORS[CLEAN[idx].major]; ctx.beginPath(); ctx.arc(x, y, 2.2 + 2.8 * a, 0, 7); ctx.fill(); });
+        ctx.globalAlpha = 1;
+        ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height); ctx.font = "12px Public Sans";
+        MAJORS.forEach((m, i) => {
+          const x = 60 + i * 140; ctx.fillStyle = css("--muted"); ctx.fillRect(x, 190 - popMean[i] * 20, 50, popMean[i] * 20); ctx.fillStyle = css("--ink"); ctx.fillText(fmt(popMean[i], 2), x, 185 - popMean[i] * 20);
+          if (isFinite(st.est[i])) { ctx.fillStyle = MAJOR_COLORS[m]; ctx.fillRect(x + 55, 190 - st.est[i] * 20, 50, st.est[i] * 20); ctx.fillStyle = css("--ink"); ctx.fillText(fmt(st.est[i], 2), x + 55, 185 - st.est[i] * 20); }
+          else { ctx.fillStyle = css("--coral"); ctx.fillText("nobody", x + 57, 172); ctx.fillText("sampled", x + 57, 186); }
+          ctx.fillStyle = css("--ink"); ctx.fillText(`${m} (n=${st.counts[i]})`, x, 208);
+        });
+        ctx.fillStyle = css("--muted"); ctx.fillRect(60, 6, 10, 10); ctx.fillStyle = css("--ink"); ctx.fillText("population mean sleep by major", 74, 15); ctx.fillStyle = css("--lagoon"); ctx.fillRect(300, 6, 10, 10); ctx.fillStyle = css("--ink"); ctx.fillText("sample estimate", 314, 15);
+        const pts = curve(strat), ci = clamp((st.n - 5) / 5, 0, pts.length - 1), lo = Math.floor(ci), f = ci - lo, y = pts[lo][1] + ((pts[Math.min(lo + 1, pts.length - 1)][1] - pts[lo][1]) * f);
+        lineChart(cv2, [{ name: `avg error of the mean (30 draws${strat ? ", stratified" : ""})`, pts, color: css("--coral") }], { xlabel: "sample size n", ymin: 0, marker: { x: st.n, y, label: `n = ${fmt(st.n, 0)}` } });
+      }
+      const morph = morpher(draw, 450);
+      function redraw(o = {}) {
+        const full = sample(n, seed), smp = kShown == null ? full : full.slice(0, kShown), ids = new Set(smp.map((r) => r.id));
+        const on = ORDER.map((idx) => (ids.has(CLEAN[idx].id) ? 1 : 0));
+        const counts = MAJORS.map((m) => smp.filter((r) => r.major === m).length), est = MAJORS.map((m) => avg(smp.filter((r) => r.major === m).map((r) => r.sleep_hours)));
+        morph({ on, est, counts, n: smp.length }, o);
+        const err = smp.length ? Math.abs(avg(smp.map((r) => r.sleep_hours)) - allMean) : NaN, small = Math.min(...counts);
+        mb.update([{ k: "Sample size", v: smp.length, d: 0 }, { k: "Error of overall mean", v: err, d: 3, cls: err < 1e-9 ? "good" : "" }, { k: "Smallest group in sample", v: small, d: 0, cls: small < 3 ? "bad" : "good" }]);
+        const missing = MAJORS.filter((_, i) => !counts[i]);
+        status.set(kShown != null ? "" : missing.length ? `No ${missing.join(", ")} student in this sample. Their mean sleep cannot be estimated at all: it is <b>undefined</b>, not 0. Stratified sampling guarantees every major at least one student.` : smp.length === CLEAN.length ? "The sample is the whole population, so the estimate equals the true mean and the error is exactly 0. Sampling only saves work when n is much smaller than the population." : "", missing.length ? "edge" : "info");
+      }
+      const nCtl = range({ label: "Sample size", min: 5, max: 300, step: 5, value: n, onchange: (v) => { n = v; kShown = null; redraw(); } });
+      const sCtl = check({ label: "Stratified by major", value: strat, onchange: (v) => { strat = v; kShown = null; redraw(); } });
+      const dCtl = range({ label: "Random draw", min: 1, max: 20, step: 1, value: seed, onchange: (v) => { seed = v; kShown = null; redraw(); } });
+      redraw();
+      const set = (ctl, v) => { if (ctl.get() !== v) ctl.apply(v); };
+      const ex = examples([
+        { label: "Draw 30 students one by one", kind: "example", note: "Simple random sampling, one student at a time. Each new student lights up in the population grid and moves the estimate of their major's bar.", run: async () => {
+          set(sCtl, false); set(dCtl, 1); nCtl.set(30); n = 30;
+          for (let k = 0; k <= 30; k++) { kShown = k; redraw(); await sleep(130); }
+          kShown = null; redraw();
+        } },
+        { label: "Stratified keeps every major", kind: "example", note: "At n = 15, a simple random sample can leave a major almost empty. Switching on stratification samples each major separately in proportion to its size, so every bar gets its share.", run: async () => { set(sCtl, false); set(dCtl, 1); await nCtl.animateTo(15, 900); await sleep(1600); sCtl.apply(true); await sleep(1600); } },
+        { label: "Progressive sampling", kind: "example", note: "The sample grows from 5 to 300 students. The marker rides the error curve: it falls fast at first, then flattens. From n = 25 to n = 100 the average error falls from 0.125 to 0.054 h: four times the data for about half the error.", run: async () => { set(sCtl, false); await nCtl.animateTo(5, 600); await nCtl.animateTo(300, 4000); } },
+        { label: "Sample = population", kind: "edge", note: "n reaches 300, the whole population. Every dot is lit and every sample bar equals the population bar.", run: async () => { await nCtl.animateTo(300, 1500); await sleep(500); } },
+        { label: "Tiny sample, empty group", kind: "edge", note: "n = 5 for 5 majors, without stratification. At least one major gets nobody; then the same n with stratification.", run: async () => { set(sCtl, false); set(dCtl, 1); await nCtl.animateTo(5, 1500); await sleep(2400); sCtl.apply(true); await sleep(1500); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, nCtl, sCtl, dCtl), h("div", { class: "stage" }, cvG, h("div", { class: "legend" }, ...MAJORS.map((m) => h("span", {}, h("i", { style: `background:${MAJOR_COLORS[m]}` }), m))), cv, mb, status, h("h3", {}, "Progressive sampling: how the error shrinks with n"), cv2)));
+    },
+  });
+
+  steps.push({
+    id: "transform", title: "Transformations: normalize, discretize, binarize", time: 15,
+    theory: `<h3>Changing the values without changing the information</h3>
+      <ul><li><b>Normalization / standardization</b>: x' = (x − mean) / sd gives every attribute mean 0 and sd 1. Essential when attributes have different ranges (commute in minutes 2 to 90, GPA 1.5 to 4): otherwise the big-range attribute dominates every distance. The robust version uses the median and the absolute deviation.</li>
+      <li><b>Variable transformation</b>: log, square root, 1/x. Commute times are skewed (a few students live far away); log makes the distribution symmetric and multiscale problems tractable. Careful: 1/x reverses the order.</li>
+      <li><b>Discretization</b>: continuous to categories, needed by classification and association rules. Unsupervised: equal width (uniform intervals) or equal frequency (same number of objects per bin). Supervised: choose split points that make the bins pure in the class label (entropy-based).</li>
+      <li><b>Binarization</b>: m categories into binary attributes; one-hot (one 1, the rest 0) gives asymmetric binary attributes that association analysis needs.</li></ul>`,
+    ask: `<div class='a'>Run "Log folds the long tail": the skewness of commute_min falls from 1.7 to 0.02. Then discretize sleep with 4 equal-width bins (70 / 136 / 83 / 11 students, most in two bins) vs equal frequency (74 / 72 / 72 / 82, not 75 each because many students share the value at a cut). Ask which one a decision tree would prefer and why. Edge cases: the z-score of a constant column is undefined (sd 0); 36 students drink no coffee, so plain log fails and we use log(1 + x); a single bin carries no information.</div>`,
+    mount() {
+      let attr = "commute_min", tf = "raw", nb = 4, mode = "width";
+      const cv = canvas(760, 230), cv2 = canvas(760, 220), mb = metricsBox(), status = statusBox(), status2 = statusBox();
+      const RAW = { commute_min: col(CLEAN, "commute_min"), coffee_cups: col(CLEAN, "coffee_cups"), constant: CLEAN.map(() => 22.0) };
+      const NAMES = { commute_min: "commute_min", coffee_cups: "coffee_cups", constant: "ac_temp_c (everyone says 22.0)" };
+      function transform() {
+        const v = RAW[attr], name = NAMES[attr];
+        if (tf === "log") { const z = v.filter((x) => x <= 0).length; return z ? { vals: v.map((x) => Math.log(1 + x)), title: `log(1 + ${attr})`, msg: `log(0) = −∞, and ${z} students have the value 0. Plain log would turn them into −∞, so we use log(1 + x), which keeps 0 at 0.` } : { vals: v.map((x) => Math.log(x)), title: `log(${name})` }; }
+        if (tf === "z") { const m = mean(v), s = sd(v); return s > 0 ? { vals: v.map((x) => (x - m) / s), title: `z-score of ${name}` } : { vals: v, title: `${name}: z-score undefined`, msg: "Every value is the same, so sd = 0 and (x − mean) ÷ sd divides by zero. The z-score is <b>undefined</b>. A constant column carries no information: drop it." }; }
+        if (tf === "minmax") { const lo = Math.min(...v), hi = Math.max(...v); return hi > lo ? { vals: v.map((x) => (x - lo) / (hi - lo)), title: `min-max scaled ${name}` } : { vals: v, title: `${name}: min-max undefined`, msg: "max = min, so (x − min) ÷ (max − min) divides by zero. Min-max scaling is <b>undefined</b> for a constant column." }; }
+        return { vals: v, title: name };
+      }
+      let curVals = null, gen = 0;
+      function drawTop(vals, title) { const m = mean(vals); drawHist(cv, histState(vals, { bins: 40, title, lines: [{ x: m, color: css("--coral"), label: `mean ${fmt(m, 2)}` }] })); }
+      function redrawTop(animate) {
+        const tg = transform(), v = tg.vals, m = mean(v), s = sd(v), skew = s > 0 ? mean(v.map((x) => ((x - m) / s) ** 3)) : NaN;
+        mb.update([{ k: "Mean", v: m }, { k: "Std dev", v: s }, { k: "Min", v: Math.min(...v) }, { k: "Max", v: Math.max(...v) }, { k: "Skewness", v: skew, cls: isFinite(skew) ? (Math.abs(skew) < 0.5 ? "good" : "bad") : "" }]);
+        status.set(tg.msg || "");
+        const g = ++gen;
+        if (!animate || !curVals) { curVals = v; drawTop(v, tg.title); return Promise.resolve(); }
+        const from = curVals.slice();
+        return tween(1300, (t) => { if (g !== gen) return; curVals = from.map((x, i) => x + (v[i] - x) * t); drawTop(curVals, tg.title); });
+      }
+      const SL = col(CLEAN, "sleep_hours").slice().sort((a, b) => a - b), LO = 3.45, HI = 10.05, HB = 33;
+      const cutsFor = () => { if (nb === 1) return []; if (mode === "width") { const lo = SL[0], hi = SL[SL.length - 1]; return Array.from({ length: nb - 1 }, (_, i) => lo + ((i + 1) * (hi - lo)) / nb); } return Array.from({ length: nb - 1 }, (_, i) => SL[Math.floor(((i + 1) * SL.length) / nb)]); };
+      const binCounts = (cuts) => { const c = new Array(cuts.length + 1).fill(0); SL.forEach((x) => { let b = 0; while (b < cuts.length && x >= cuts[b]) b++; c[b]++; }); return c; };
+      function drawBins(cuts) {
+        const counts = binCounts(cuts), pal = [css("--lagoon"), css("--mint-2")];
+        const st = histState(SL, { min: LO, max: HI, bins: HB, title: `sleep_hours in ${cuts.length + 1} ${mode === "width" ? "equal-width" : "equal-frequency"} bin${cuts.length ? "s" : ""}; students per bin shown at the top`, lines: cuts.map((c, i) => ({ x: c, color: css("--coral"), label: `cut ${fmt(c, 2)}`, dy: 14 + (i % 2) * 14 })) });
+        st.binColors = st.bins.map((_, i) => { const center = LO + ((i + 0.5) * (HI - LO)) / HB; let b = 0; while (b < cuts.length && center >= cuts[b]) b++; return pal[b % 2]; });
+        const { X } = drawHist(cv2, st), edges = [LO, ...cuts, HI], ctx = cv2.getContext("2d");
+        ctx.font = "bold 13px Public Sans"; ctx.fillStyle = css("--ink"); ctx.textAlign = "center"; counts.forEach((c, i) => ctx.fillText(c, (X(edges[i]) + X(edges[i + 1])) / 2, 32)); ctx.textAlign = "left";
+        return counts;
+      }
+      let cutsNow = null, gen2 = 0;
+      const resample = (a, n) => (n === 0 ? [] : !a.length ? new Array(n).fill((LO + HI) / 2) : Array.from({ length: n }, (_, i) => a[Math.round((i * (a.length - 1)) / Math.max(1, n - 1))]));
+      function redrawBins(ms = 900) {
+        const target = cutsFor(), counts = binCounts(target), from = cutsNow ? resample(cutsNow, target.length) : target, g = ++gen2;
+        const ideal = SL.length / nb, spread = Math.max(...counts) - Math.min(...counts);
+        status2.set(nb === 1 ? `One bin: all ${SL.length} students get the same category. The discretized attribute is constant, carries zero information (entropy 0) and no model can use it.` : mode === "freq" && spread > 1 ? `Equal frequency aims at ${fmt(ideal, 1)} students per bin, but the bins hold ${counts.join(" / ")}. sleep_hours is recorded to 0.1 h, so many students share the value at a cut, and tied students must go into the same bin.` : "", nb === 1 ? "edge" : "info");
+        return tween(ms, (t) => { if (g !== gen2) return; cutsNow = from.map((c, i) => c + (target[i] - c) * t); drawBins(cutsNow); });
+      }
+      const aSel = select({ label: "Attribute", options: Object.entries(NAMES).map(([value, label]) => ({ value, label })), value: attr, onchange: (v) => { attr = v; redrawTop(false); } });
+      const tSel = select({ label: "Transform", options: [{ value: "raw", label: "raw" }, { value: "log", label: "log(x)" }, { value: "z", label: "z-score" }, { value: "minmax", label: "min-max to [0,1]" }], value: tf, onchange: (v) => { tf = v; redrawTop(true); } });
+      const bCtl = range({ label: "Bins for sleep_hours", min: 1, max: 8, step: 1, value: nb, onchange: (v) => { nb = v; redrawBins(400); } });
+      const mSel = select({ label: "Discretization", options: [{ value: "width", label: "equal width" }, { value: "freq", label: "equal frequency" }], value: mode, onchange: (v) => { mode = v; redrawBins(); } });
+      redrawTop(false); redrawBins(0);
+      const top = async (a, from, to) => { if (aSel.get() !== a) aSel.apply(a); if (tSel.get() !== from) { tSel.apply(from); await sleep(1400); } await sleep(500); tSel.apply(to); await sleep(1600); };
+      const ex = examples([
+        { label: "Log folds the long tail", kind: "example", note: "Every commute value glides from x to log(x). The long right tail of far-away students folds in and the histogram becomes a symmetric bell. Watch the skewness box.", run: () => top("commute_min", "raw", "log") },
+        { label: "z-score: same shape, new axis", kind: "example", note: "Every value glides from x to (x − mean) ÷ sd. The bars keep their shape exactly; only the axis changes, until the mean is 0 and the sd is 1. Standardizing rescales, it does not reshape.", run: () => top("commute_min", "raw", "z") },
+        { label: "Equal width vs equal frequency", kind: "example", note: "Four equal-width cuts slide to equal-frequency positions. Equal width leaves the outer bins almost empty; equal frequency moves the cuts into the crowd so each bin holds about a quarter of the students.", run: async () => { if (mSel.get() !== "width") { mSel.apply("width"); await sleep(1000); } await bCtl.animateTo(4, 600); await sleep(800); mSel.apply("freq"); await sleep(1300); } },
+        { label: "z-score of a constant", kind: "edge", note: "A column where every student gives the same answer (22.0). Its variance is 0.", run: () => top("constant", "raw", "z") },
+        { label: "log of zero", kind: "edge", note: "coffee_cups is a count, and many students drink none.", run: () => top("coffee_cups", "raw", "log") },
+        { label: "One bin", kind: "edge", note: "The number of bins glides down to 1: the cuts disappear one by one.", run: async () => { await bCtl.animateTo(8, 800); await sleep(500); await bCtl.animateTo(1, 2400); await sleep(500); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, aSel, tSel, bCtl, mSel), h("div", { class: "stage" }, cv, mb, status, cv2, status2)));
+    },
+  });
+
+  steps.push({
+    id: "dimensions", title: "Dimensionality: the curse and PCA", time: 15,
+    theory: `<h3>Why more attributes can be worse</h3>
+      <p>With every new attribute the data becomes sparser. In high dimensions the nearest and farthest neighbors of a point are almost equally far, so distance-based methods (clustering, kNN) lose their grip: the <b>curse of dimensionality</b>. Remedies: <b>feature selection</b> (keep a subset: drop redundant attributes such as VAT, irrelevant ones such as the student id; filter, wrapper and embedded approaches) and <b>feature extraction</b> such as PCA.</p>
+      <p><b>Principal component analysis</b> creates new attributes as linear combinations of the old ones, orthogonal to each other, ordered by how much variance they capture. It is computed with the SVD X = U S Vᵀ of the <b>mean-centered</b> (and, if scales differ, normalized) data matrix: the columns of V are the principal axes, the singular values in S their importance. The lecture's own trap: run PCA without centring and PC1 points at the data's mean, not along its spread.</p>`,
+    ask: `<div class='a'>Left: ask what happens to the gap between nearest and farthest neighbor as d grows. It closes: "Curse of dimensionality" draws the ratio nearest ÷ farthest climbing from 0.005 at d = 1 to 0.70 at d = 60. Right: run "Rotate an axis by hand" and ask where the captured share peaks: at PC1, 45° in scaled units, 88.2% of the variance. Then "The centring trap": ask why PC1 is wrong; it swings to 67°, the direction of the mean. "Forget to normalize": PC1 lies at 3° and explains 99.8%, because the sd of study_hours (5.99 h) dwarfs that of gpa (0.41). Then ask what PC1 means here (a "diligence" axis: study hours and GPA together). Edge cases: a circle has tied eigenvalues, so PC1 is not unique; an exact copy gives PC1 100%.</div>`,
+    mount() {
+      const cvA = canvas(370, 270), cvB = canvas(370, 270), mbA = metricsBox(), mbB = metricsBox(), status = statusBox();
+      let center = true, scale = true, dset = "survey", cand = 0, dShow = 60;
+      /* for d = 1..60: 20 random query points, 100 random points each; nearest ÷ farthest (bounded, readable) and the relative gap (farthest − nearest) ÷ nearest */
+      const CURSE = (() => { const rng = RNG(3), pts = []; for (let d = 1; d <= 60; d++) { const near = [], gap = []; for (let t = 0; t < 20; t++) { const q = Array.from({ length: d }, () => rng()); let mn = Infinity, mx = 0; for (let i = 0; i < 100; i++) { let s = 0; for (let k = 0; k < d; k++) { const z = rng() - q[k]; s += z * z; } const dd = Math.sqrt(s); if (dd < mn) mn = dd; if (dd > mx) mx = dd; } near.push(mn / mx); gap.push((mx - mn) / mn); } pts.push([d, mean(near), mean(gap)]); } return pts; })();
+      function drawCurse() {
+        const pts = CURSE.filter((p) => p[0] <= dShow).map((p) => [p[0], p[1]]), cur = CURSE[pts.length - 1];
+        lineChart(cvA, [{ name: "nearest ÷ farthest neighbor", pts, color: css("--coral") }], { xlabel: "attributes d", xmin: 1, xmax: 60, ymin: 0, ymax: 1, marker: { x: cur[0], y: cur[1], label: `d = ${cur[0]}` } });
+        mbA.update([{ k: "Attributes d", v: cur[0], d: 0 }, { k: "Nearest ÷ farthest", v: cur[1] }, { k: "(farthest − nearest) ÷ nearest", v: cur[2] }]);
+      }
+      function compute() {
+        let P = dset === "survey" ? CLEAN.map((r) => [r.study_hours, r.gpa]) : dset === "copy" ? CLEAN.map((r) => [r.study_hours, 2.1 + 0.07 * r.study_hours]) : Array.from({ length: 36 }, (_, i) => [4 + Math.cos((i * Math.PI) / 18), 3 + Math.sin((i * Math.PI) / 18)]);
+        const xs = P.map((p) => p[0]), ys = P.map((p) => p[1]), mx = mean(xs), my = mean(ys), sx = sd(xs), sy = sd(ys);
+        if (center) P = P.map(([x, y]) => [x - mx, y - my]); if (scale) P = P.map(([x, y]) => [x / sx, y / sy]);
+        let a = 0, b = 0, c = 0; P.forEach(([x, y]) => { a += x * x; b += x * y; c += y * y; });
+        const tr = a + c, det = a * c - b * b, l1 = tr / 2 + Math.sqrt(Math.max(0, (tr * tr) / 4 - det)), l2 = Math.max(0, tr - l1), tie = l1 - l2 <= 1e-9 * tr;
+        let v = Math.abs(b) > 1e-12 * tr ? [b, l1 - a] : a >= c ? [1, 0] : [0, 1]; const nv = Math.hypot(v[0], v[1]); v = [v[0] / nv, v[1] / nv];
+        let ang = (Math.atan2(v[1], v[0]) * 180) / Math.PI; ang = ((ang % 180) + 180) % 180;
+        const px = P.map((p) => p[0]), py = P.map((p) => p[1]), padB = (lo, hi) => { const s = (hi - lo) * 0.06 || 1; return [lo - s, hi + s]; };
+        const bx = padB(Math.min(0, ...px), Math.max(0, ...px)), by = padB(Math.min(0, ...py), Math.max(0, ...py));
+        return { pts: P, bx, by, ang, tie: tie ? 1 : 0, pct: (100 * l1) / tr, a, b, c, tr };
+      }
+      const capture = (S, deg) => { const u = (deg * Math.PI) / 180, cs = Math.cos(u), sn = Math.sin(u); return (100 * (S.a * cs * cs + 2 * S.b * cs * sn + S.c * sn * sn)) / S.tr; };
+      function drawPCA(st) {
+        const ctx = cvB.getContext("2d"), W = cvB.width, H = cvB.height; ctx.clearRect(0, 0, W, H); ctx.font = "12px Public Sans";
+        const L = 40, R = W - 10, T = 22, B = H - 26, X = (x) => L + ((x - st.bx[0]) / (st.bx[1] - st.bx[0])) * (R - L), Y = (y) => T + (1 - (y - st.by[0]) / (st.by[1] - st.by[0])) * (B - T);
+        ctx.fillStyle = css("--muted"); for (let g = 0; g <= 4; g++) { const x = st.bx[0] + (g / 4) * (st.bx[1] - st.bx[0]), y = st.by[0] + (g / 4) * (st.by[1] - st.by[0]); ctx.textAlign = "center"; ctx.fillText(tick(x, 1), X(x), H - 8); ctx.textAlign = "left"; ctx.fillText(tick(y, 1), 2, Y(y) + 4); }
+        ctx.save(); ctx.beginPath(); ctx.rect(L, T, R - L, B - T); ctx.clip();
+        ctx.fillStyle = css("--lagoon"); ctx.globalAlpha = 0.45; st.pts.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(X(x), Y(y), 3, 0, 7); ctx.fill(); }); ctx.globalAlpha = 1;
+        const big = 4 * Math.max(st.bx[1] - st.bx[0], st.by[1] - st.by[0]);
+        const line = (deg, color, dash, width) => { const u = (deg * Math.PI) / 180, dx = Math.cos(u) * big, dy = Math.sin(u) * big; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(X(-dx), Y(-dy)); ctx.lineTo(X(dx), Y(dy)); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1; };
+        line(st.cand, css("--ink-2"), [6, 4], 1.5);
+        if (st.tie < 0.5) { line(st.ang, css("--coral"), [], 3); line(st.ang + 90, css("--mint-2"), [], 2); }
+        ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(0) - 6, Y(0)); ctx.lineTo(X(0) + 6, Y(0)); ctx.moveTo(X(0), Y(0) - 6); ctx.lineTo(X(0), Y(0) + 6); ctx.stroke(); ctx.lineWidth = 1;
+        ctx.restore();
+        ctx.fillStyle = css("--ink"); ctx.fillText(st.title, L, 14);
+        ctx.fillStyle = css("--coral"); ctx.fillText("PC1", R - 80, B - 6); ctx.fillStyle = css("--mint-2"); ctx.fillText("PC2", R - 50, B - 6); ctx.fillStyle = css("--ink-2"); ctx.fillText("- - candidate", R - 160, B - 6);
+      }
+      const morph = morpher(drawPCA, 1100);
+      let curAng = null;
+      function redraw(o = {}) {
+        const S = compute();
+        if (curAng != null) { while (S.ang - curAng > 90) S.ang -= 180; while (S.ang - curAng < -90) S.ang += 180; }
+        curAng = S.ang;
+        const names = { survey: "study_hours vs gpa", copy: "study_hours vs an exact copy", circle: "a perfect circle" };
+        morph({ pts: S.pts, bx: S.bx, by: S.by, ang: S.ang, cand, tie: S.tie, title: `${names[dset]}${center ? "" : ", not centered"}${scale ? ", scaled" : ""}` }, o);
+        const capt = capture(S, cand), pc1 = S.tie ? 50 : S.pct;
+        mbB.update([{ k: "PC1 explains", v: pc1, d: 1, u: "%" }, { k: "PC2 explains", v: 100 - pc1, d: 1, u: "%" }, { k: "Candidate captures", v: capt, d: 1, u: "%", cls: Math.abs(capt - pc1) < 0.5 ? "good" : "" }, { k: "PC1 angle", v: S.tie ? "not unique" : fmt(((S.ang % 180) + 180) % 180, 0) + "°" }]);
+        status.set(S.tie ? "Both directions carry exactly the same variance (the two eigenvalues are tied). Every axis captures 50%, so PC1 is <b>not unique</b>: any direction is a valid answer, and PCA cannot reduce this data." : dset === "copy" && center ? `The second attribute is an exact linear function of the first. PC1 explains ${fmt(S.pct, 0)}% and PC2 nothing: one attribute is redundant. Keep one of them, or keep PC1.` : !center ? "Not centered: PCA now decomposes XᵀX instead of the covariance. PC1 runs from the origin (+) toward the middle of the cloud, along its mean, not along its spread." : "", S.tie ? "edge" : "info");
+      }
+      const dSel = select({ label: "Data", options: [{ value: "survey", label: "study_hours vs gpa" }, { value: "copy", label: "edge: gpa replaced by a copy of study" }, { value: "circle", label: "edge: a perfect circle" }], value: dset, onchange: (v) => { dset = v; curAng = null; redraw({ instant: true }); } });
+      const cCtl = check({ label: "Center the data (subtract the mean)", value: center, onchange: (v) => { center = v; redraw(); } });
+      const sCtl = check({ label: "Normalize each attribute (divide by sd)", value: scale, onchange: (v) => { scale = v; redraw(); } });
+      const aCtl = range({ label: "Candidate axis angle", min: 0, max: 179, step: 1, value: cand, fmt: (v) => v + "°", onchange: (v) => { cand = v; redraw({ ms: 80 }); } });
+      const kCtl = range({ label: "Attributes d (left chart)", min: 1, max: 60, step: 1, value: dShow, onchange: (v) => { dShow = v; drawCurse(); } });
+      drawCurse(); redraw();
+      const set = (ctl, v) => { if (ctl.get() !== v) ctl.apply(v); };
+      const base = async (d = "survey") => { set(dSel, d); set(cCtl, true); set(sCtl, true); await sleep(400); };
+      const ex = examples([
+        { label: "Rotate an axis by hand", kind: "example", note: "The dashed candidate axis turns through 180°. The share of variance it captures rises and falls; PC1 (red) is exactly the direction where that share peaks, and the candidate stops there.", run: async () => { await base(); await aCtl.animateTo(0, 500); await aCtl.animateTo(179, 3500); const S = compute(); await aCtl.animateTo(Math.round(((S.ang % 180) + 180) % 180), 1200); } },
+        { label: "The centring trap", kind: "example", note: "'Center the data' is switched off. The cloud flies away from the origin (+) and PC1 swings to point from the origin at the cloud, along the mean.", run: async () => { await base(); await sleep(400); cCtl.apply(false); await sleep(1700); } },
+        { label: "Forget to normalize", kind: "example", note: "Centring on, normalization off. study_hours has a far larger spread than gpa, so PC1 swings toward the study_hours axis: the attribute with the biggest numbers wins.", run: async () => { await base(); await sleep(400); sCtl.apply(false); await sleep(1700); } },
+        { label: "Curse of dimensionality", kind: "example", note: "The left chart is drawn one attribute at a time, from d = 1 to 60. The ratio nearest ÷ farthest neighbor climbs from 0.005 at d = 1 to 0.70 at d = 60: in many dimensions the nearest point is almost as far away as the farthest one, so 'nearest' stops meaning much.", run: async () => { await kCtl.animateTo(1, 500); await kCtl.animateTo(60, 3500); } },
+        { label: "Tied variances: a circle", kind: "edge", note: "Points on a perfect circle have the same variance in every direction. The candidate axis turns all the way round.", run: async () => { await base("circle"); await aCtl.animateTo(0, 400); await aCtl.animateTo(179, 3000); } },
+        { label: "A redundant copy", kind: "edge", note: "gpa is replaced by an exact linear function of study_hours, so the second attribute adds nothing new.", run: async () => { await base("copy"); await sleep(1200); } },
+      ]);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, dSel, cCtl, sCtl, aCtl, kCtl), h("div", { class: "stage" }, h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:.6rem" }, h("div", {}, cvA, mbA), h("div", {}, cvB, mbB)), status)));
+    },
+  });
+
+  /* tournament: the cleaning challenge */
+  function pipeline(rows, p) {
+    let out = rows.map((r) => ({ ...r }));
+    if (p.labels === "fix") out = out.map((r) => ({ ...r, major: canon(r.major) }));
+    if (p.dedupe === "yes") { const seen = new Set(); out = out.filter((r) => !seen.has(r.id) && seen.add(r.id)); }
+    for (const k of ["sleep_hours", "coffee_cups", "commute_min"]) {
+      const v = col(out, k); const m = mean(v), s = sd(v); const sorted = v.slice().sort((a, b) => a - b), q1 = sorted[Math.floor(sorted.length * 0.25)], q3 = sorted[Math.floor(sorted.length * 0.75)], iqr = q3 - q1;
+      const isOut = (x) => p.outlier === "none" ? false : p.outlier === "z2" ? Math.abs(x - m) > 2 * s : p.outlier === "z3" ? Math.abs(x - m) > 3 * s : x < q1 - 1.5 * iqr || x > q3 + 1.5 * iqr;
+      if (p.action === "remove") out = out.filter((r) => r[k] == null || !isOut(r[k])); else out.forEach((r) => { if (r[k] != null && isOut(r[k])) r[k] = p.action === "null" ? null : median(v); });
+    }
+    if (p.missing === "drop") out = out.filter((r) => r.sleep_hours != null && r.commute_min != null);
+    else if (p.missing !== "ignore") { for (const k of ["sleep_hours", "commute_min"]) { const v = col(out, k); const fill = p.missing === "mean" ? mean(v) : median(v); out.forEach((r) => { if (r[k] == null) r[k] = fill; }); } }
+    return out;
+  }
+  function summary(rows) { const g = {}; MAJORS.forEach((m) => { const v = rows.filter((r) => r.major === m && r.sleep_hours != null).map((r) => r.sleep_hours); g[m] = v.length ? mean(v) : NaN; }); return { groups: g, n: rows.length, corr: corr(rows, "study_hours", "gpa"), commute: median(col(rows, "commute_min")), coffee: mean(col(rows, "coffee_cups")) }; }
+  const TP = { missing: 0.15, missingBiased: true, outliers: 12, typos: 0.25, duplicates: 20, noise: 1.5 };
+  function tourRun(p, seeds) {
+    const pts = [], det = [];
+    for (const s of seeds) {
+      const truth = clean(s); const dirty = messy(truth, TP, s); const fixed = pipeline(dirty, p);
+      const a = summary(truth), b = summary(fixed);
+      let err = 0; MAJORS.forEach((m) => (err += isNaN(b.groups[m]) ? 1 : Math.min(1, Math.abs(a.groups[m] - b.groups[m]) / 0.5)));
+      err = err / 5 * 0.4 + Math.min(1, Math.abs(a.n - b.n) / 40) * 0.2 + Math.min(1, Math.abs(a.corr - b.corr) / 0.3) * 0.2 + Math.min(1, Math.abs(a.commute - b.commute) / 10) * 0.1 + Math.min(1, Math.abs(a.coffee - b.coffee) / 2) * 0.1;
+      pts.push(1000 * (1 - err)); det.push({ n: b.n, tn: a.n, corr: b.corr, tcorr: a.corr });
+    }
+    return { points: mean(pts), details: [{ k: "Rows after cleaning", v: fmt(mean(det.map((d) => d.n)), 0) }, { k: "True rows", v: fmt(mean(det.map((d) => d.tn)), 0) }, { k: "corr(study, gpa)", v: fmt(mean(det.map((d) => d.corr)), 2) }, { k: "true corr", v: fmt(mean(det.map((d) => d.tcorr)), 2) }], summary: "Score = how close your cleaned dataset's summary statistics are to the hidden clean truth: mean sleep per major (40%), number of students (20%), corr(study, gpa) (20%), median commute (10%), mean coffee (10%)." };
+  }
+  const TOUR = Lab.tournamentSpec({
+    labId: "L3",
+    intro: `<h3>Rules</h3><p>Each hidden survey has typos in <i>major</i>, duplicate submissions, data-entry errors in sleep, coffee and commute, and missing values that are <b>not</b> missing at random. Choose a cleaning pipeline (the steps run in the order listed). Your cleaned dataset is compared with the true clean dataset on the summary statistics listed under the result. Practice on 3 surveys, then one official run on 5 hidden surveys.</p>`,
+    params: [
+      { key: "labels", label: "1. Labels", type: "select", string: true, options: [{ value: "asis", label: "leave as they are" }, { value: "fix", label: "standardize major labels" }], default: "asis" },
+      { key: "dedupe", label: "2. Duplicates", type: "select", string: true, options: [{ value: "no", label: "keep" }, { value: "yes", label: "remove by id" }], default: "no" },
+      { key: "outlier", label: "3. Outlier rule", type: "select", string: true, options: [{ value: "none", label: "none" }, { value: "z2", label: "|z| > 2" }, { value: "z3", label: "|z| > 3" }, { value: "iqr", label: "IQR × 1.5" }], default: "none" },
+      { key: "action", label: "3b. Outlier action", type: "select", string: true, options: [{ value: "remove", label: "remove the row" }, { value: "null", label: "set the value to missing" }, { value: "median", label: "replace with the median" }], default: "remove" },
+      { key: "missing", label: "4. Missing values", type: "select", string: true, options: [{ value: "ignore", label: "ignore (use available values)" }, { value: "drop", label: "drop the row" }, { value: "mean", label: "estimate with the mean" }, { value: "median", label: "estimate with the median" }], default: "ignore" },
+    ],
+    practiceSeeds: [21, 22, 23],
+    run: tourRun,
+  });
+  steps.push({
+    id: "tournament", title: "Tournament: the cleaning challenge", tour: true, time: 20,
+    mount: () => {
+      const dirty = messy(clean(21), TP, 21), labels = new Set(dirty.map((r) => r.major)), ids = new Set(dirty.map((r) => r.id));
+      return h("div", {}, tournament(TOUR),
+        h("h3", {}, "What a practice survey looks like (survey 21, first rows)"),
+        h("div", { class: "metrics" }, metric("Rows", dirty.length), metric("Distinct ids", ids.size), metric("Distinct major labels", labels.size), metric("Missing sleep_hours", dirty.filter((r) => r.sleep_hours == null).length), metric("Sleep values over 24 h", dirty.filter((r) => r.sleep_hours > 24).length)),
+        table(dirty.map((r) => ({ ...r, major: vis(r.major) })), COLS, 10));
+    },
+  });
+
+  window._lab3 = { clean, messy, pipeline, summary, tourRun, corr, TOUR };
+  Lab.init({ title: "Lab 3: Data and data quality", steps, footer: "Sunday, week 1. Slides: Data Mining and Data." });
+})();
+
+</script>
+</body>
+</html>

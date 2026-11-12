@@ -1,0 +1,1220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS220P · TA cheat sheet · week 1 labs</title>
+<script>
+  // apply the stored theme before first paint
+  (function () { try { var t = localStorage.getItem("cs220p-cheat-theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {} })();
+</script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #18202c; --muted: #5b6676; --line: #dde2ea;
+    --accent: #1f6fd1; --accent-ink: #ffffff; --accent-soft: #e5eefb;
+    --ex: #f3f6fa; --mark: #ffe58a; --flash: #fff4c2;
+    --t1: #3f8fd8; --t2: #2fa58a; --t3: #d58f2a; --t4: #8a6ad8; --tour: #d9574d;
+    --shadow: 0 1px 2px rgba(20, 30, 50, .06), 0 2px 8px rgba(20, 30, 50, .05);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #11151c; --panel: #1a2029; --ink: #e8edf5; --muted: #9aa6b8; --line: #2c3542;
+    --accent: #6aa8ff; --accent-ink: #0d1520; --accent-soft: #1e2b3d;
+    --ex: #212834; --mark: #6b5a12; --flash: #3a3412;
+    --t1: #5ea7ee; --t2: #45c2a3; --t3: #e8a64a; --t4: #a68bf0; --tour: #ff8a80;
+    --shadow: none;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11151c; --panel: #1a2029; --ink: #e8edf5; --muted: #9aa6b8; --line: #2c3542;
+      --accent: #6aa8ff; --accent-ink: #0d1520; --accent-soft: #1e2b3d;
+      --ex: #212834; --mark: #6b5a12; --flash: #3a3412;
+      --t1: #5ea7ee; --t2: #45c2a3; --t3: #e8a64a; --t4: #a68bf0; --tour: #ff8a80;
+      --shadow: none;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: calc(var(--stick, 140px) + 8px); }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  a { color: var(--accent); }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+  code, .f { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* header */
+  header { position: sticky; top: 0; z-index: 10; background: var(--panel); border-bottom: 1px solid var(--line); box-shadow: var(--shadow); }
+  .bar { display: flex; align-items: center; gap: .8rem; padding: .6rem 1.2rem; flex-wrap: wrap; }
+  .brand { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
+  .brand small { font-weight: 500; color: var(--muted); }
+  .tabs { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .tab { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: .35rem .85rem; font: inherit; font-size: .95rem; cursor: pointer; white-space: nowrap; }
+  .tab b { font-weight: 700; }
+  .tab span { color: var(--muted); margin-left: .3rem; }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .tab[aria-selected="true"] span { color: inherit; opacity: .85; }
+  .grow { flex: 1; }
+  .search { position: relative; }
+  .search input { width: 19rem; max-width: 60vw; font: inherit; padding: .4rem .7rem .4rem 2rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .search input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  .search::before { content: "⌕"; position: absolute; left: .65rem; top: 50%; transform: translateY(-52%); color: var(--muted); font-size: 1.05rem; }
+  .icon-btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: .35rem .7rem; font: inherit; cursor: pointer; }
+
+  main { padding: 1rem 1.2rem 60vh; max-width: 1500px; margin: 0 auto; }
+  .labhead { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; margin: .2rem 0 .3rem; }
+  .labhead h1 { font-size: 1.6rem; margin: 0; }
+  .labhead .meta { color: var(--muted); }
+  .labhead a { font-size: .95rem; }
+  .scenario { margin: 0 0 .8rem; color: var(--muted); max-width: 70rem; }
+
+  /* timeline */
+  .timeline { display: flex; gap: 3px; margin: .4rem -1.2rem .9rem; padding: .35rem 1.2rem; position: sticky; top: var(--hh, 54px); z-index: 5; background: var(--bg); }
+  .seg { flex: var(--m) 1 0; min-width: 62px; border: 0; padding: .35rem .45rem .4rem; text-align: left; cursor: pointer; font: inherit; color: var(--ink);
+         background: var(--panel); border-top: 5px solid var(--c); border-radius: 6px; box-shadow: var(--shadow); outline: 1px solid var(--line); outline-offset: -1px; overflow: hidden; }
+  .seg:hover { background: var(--accent-soft); }
+  .seg.on { background: var(--accent-soft); outline: 2px solid var(--c); }
+  .seg .n { font-weight: 800; font-size: 1rem; }
+  .seg .clk { font-variant-numeric: tabular-nums; font-size: .82rem; color: var(--muted); display: block; white-space: nowrap; }
+  .seg .tt { font-size: .8rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .seg.tour { --c: var(--tour); }
+
+  /* formula strip */
+  .formulas { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.1rem; }
+  .fx { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .6rem; font-size: .92rem; box-shadow: var(--shadow); }
+  .fx b { color: var(--muted); font-weight: 600; font-family: system-ui, sans-serif; margin-right: .35rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
+
+  /* layout */
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 1.2rem; align-items: start; }
+  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  .faq { position: sticky; top: calc(var(--stick, 140px) + 8px); max-height: calc(100vh - var(--stick, 140px) - 24px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .7rem .9rem; box-shadow: var(--shadow); }
+  @media (max-width: 1100px) { .faq { position: static; max-height: none; } }
+  .faq h2 { font-size: 1.1rem; margin: .1rem 0 .5rem; }
+  .qa { padding: .45rem 0; border-top: 1px solid var(--line); }
+  .qa:first-of-type { border-top: 0; }
+  .qa .q { font-weight: 700; }
+  .qa .a { color: var(--ink); opacity: .9; font-size: .95rem; }
+  /* answer key table (e.g. lab 1 step 2 quiz) */
+  .key { margin: .7rem 0 .2rem; background: var(--panel); border: 2px solid var(--c); border-radius: 10px; padding: .6rem .7rem; box-shadow: var(--shadow); overflow-x: auto; }
+  .key h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
+  .key table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  .key th, .key td { border-top: 1px solid var(--line); padding: .35rem .45rem; text-align: left; vertical-align: top; }
+  .key th { color: var(--muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
+  .key td.agent { font-weight: 700; min-width: 9rem; }
+  .key td b { display: block; font-size: 1rem; }
+  .key td span { color: var(--muted); font-size: .82rem; }
+  .key.best { margin-top: .3rem; }
+  .key.best h3 span { font-weight: 400; font-size: .85rem; color: var(--muted); margin-left: .4rem; }
+  .key.best td b { font-size: .92rem; }
+  .key.best td:nth-child(2) { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem; }
+  .key.sol h3 span { font-weight: 400; font-size: .85rem; color: var(--muted); margin-left: .4rem; }
+  .sol details { border-top: 1px solid var(--line); padding: .35rem 0; }
+  .sol summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: baseline; }
+  .sol summary b { font-size: .98rem; }
+  .sol summary span { color: var(--muted); font-size: .85rem; }
+  .sol .code { position: relative; margin-top: .35rem; }
+  .sol pre { margin: 0; background: var(--ex); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .75rem; overflow: auto; max-height: 30rem;
+             font: .84rem/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 4; white-space: pre; }
+  .sol .copy { position: absolute; top: .35rem; right: .45rem; font: inherit; font-size: .78rem; padding: .15rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+
+  .step { margin: 0 0 1.2rem; border-radius: 10px; transition: background .6s; padding: .2rem .3rem; }
+  .step.flash { background: var(--flash); }
+  .step h2 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin: .2rem 0 .5rem; font-size: 1.15rem; }
+  .step h2 .num { display: inline-grid; place-items: center; min-width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--c); color: #fff; font-size: .95rem; }
+  .step h2 .clk { color: var(--muted); font-weight: 500; font-size: .92rem; font-variant-numeric: tabular-nums; }
+  .step h2 a { font-weight: 500; font-size: .9rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: .65rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 8px; padding: .6rem .8rem .55rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: .3rem; }
+  .card h3 { margin: 0; font-size: 1.22rem; line-height: 1.2; }
+  .card .x { margin: 0; }
+  .card .ex { margin: 0; background: var(--ex); border-radius: 6px; padding: .3rem .5rem; font-size: .93rem; }
+  .card .ex::before { content: "Lab: "; font-weight: 700; color: var(--muted); }
+  .card .in { margin-top: auto; font-size: .85rem; color: var(--muted); }
+  .card .in + .in { margin-top: 0; }
+  .card.ta { border-style: dashed; border-left-style: solid; background: var(--accent-soft); }
+  .card.ta .ex::before { content: "Then: "; }
+  .labtag { font-size: .8rem; font-weight: 700; color: var(--accent); }
+
+  .empty { color: var(--muted); padding: 2rem 0; font-size: 1.1rem; }
+  .results-head { color: var(--muted); margin: .2rem 0 .8rem; }
+  .labsec + .labsec { margin-top: 1.6rem; padding-top: 1rem; border-top: 2px solid var(--line); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">CS220P <small>· TA cheat sheet · week 1</small></div>
+    <nav class="tabs" id="tabs" role="tablist"></nav>
+    <div class="grow"></div>
+    <label class="search"><input id="q" type="search" placeholder="Search all labs  ( / )" autocomplete="off" spellcheck="false" aria-label="Search concepts in all labs"></label>
+    <button class="icon-btn" id="theme" type="button" title="Toggle light / dark">◐ Theme</button>
+  </div>
+</header>
+<main id="main"></main>
+
+<!-- Python solutions for lab 2 (TA only). Raw text, read by the script below; keep the code exactly as in the lab. -->
+<script type="text/plain" id="sol-flood">
+from collections import deque
+def flood_fill(img, start, new_color):          # paint bucket: BFS over same-color pixels
+    old = img[start[0]][start[1]]
+    frontier, reached = deque([start]), {start}
+    while frontier:
+        r, c = frontier.popleft()
+        img[r][c] = new_color
+        for nr, nc in [(r-1, c), (r+1, c), (r, c-1), (r, c+1)]:
+            if 0 <= nr < len(img) and 0 <= nc < len(img[0]) and (nr, nc) not in reached and img[nr][nc] == old:
+                reached.add((nr, nc)); frontier.append((nr, nc))
+    return len(reached)                           # area in pixels (oil slick: 137 px)
+</script>
+<script type="text/plain" id="sol-knight">
+from collections import deque
+def knight_moves(start, goal):                   # fewest knight moves: BFS on an implicit graph
+    jumps = [(1,2),(2,1),(2,-1),(1,-2),(-1,-2),(-2,-1),(-2,1),(-1,2)]
+    frontier, dist = deque([start]), {start: 0}
+    while frontier:
+        sq = frontier.popleft()
+        if sq == goal: return dist[sq]           # a1 -> h8: 6
+        for dr, dc in jumps:
+            n = (sq[0] + dr, sq[1] + dc)
+            if 0 <= n[0] < 8 and 0 <= n[1] < 8 and n not in dist:
+                dist[n] = dist[sq] + 1; frontier.append(n)
+</script>
+<script type="text/plain" id="sol-ladder">
+from collections import deque
+def one_letter_apart(a, b): return sum(x != y for x, y in zip(a, b)) == 1
+def word_ladder(start, goal, words):             # COLD -> CORD -> CARD -> WARD -> WARM
+    frontier, parent = deque([start]), {start: None}
+    while frontier:
+        w = frontier.popleft()
+        if w == goal:
+            path = []
+            while w: path.append(w); w = parent[w]
+            return path[::-1]
+        for n in words:
+            if n not in parent and one_letter_apart(w, n):
+                parent[n] = w; frontier.append(n)
+    return None                                   # no ladder (e.g. to QUIZ)
+</script>
+<script type="text/plain" id="sol-objects">
+def count_objects(img):                           # connected components with DFS (islands: 5)
+    seen, count = set(), 0
+    for r in range(len(img)):
+        for c in range(len(img[0])):
+            if img[r][c] == 1 and (r, c) not in seen:
+                count += 1
+                stack = [(r, c)]; seen.add((r, c))
+                while stack:
+                    y, x = stack.pop()
+                    for ny, nx in [(y-1, x), (y+1, x), (y, x-1), (y, x+1)]:
+                        if 0 <= ny < len(img) and 0 <= nx < len(img[0]) and img[ny][nx] == 1 and (ny, nx) not in seen:
+                            seen.add((ny, nx)); stack.append((ny, nx))
+    return count
+</script>
+<script type="text/plain" id="sol-folders">
+def folder_size(folder):                          # DFS: a folder's size needs everything below it
+    total = sum(f.size for f in folder.files)
+    for sub in folder.subfolders:
+        total += folder_size(sub)                 # finish the child before the parent (Home: 8.1 GB)
+    return total
+</script>
+<script type="text/plain" id="sol-build">
+def build_order(task, needs, done=None, active=None, order=None):
+    done, active, order = done or set(), active or set(), order if order is not None else []
+    if task in done: return order
+    if task in active: raise ValueError("cycle at " + task)   # gray -> gray: a cycle
+    active.add(task)
+    for pre in needs.get(task, []):
+        build_order(pre, needs, done, active, order)
+    active.discard(task); done.add(task); order.append(task)  # DFS post-order = build order
+    return order
+</script>
+<script type="text/plain" id="sol-expand">
+def neighbors(grid, cell):
+    """The free cells next to cell, in the order Up, Down, Left, Right."""
+    rows, cols = len(grid), len(grid[0])
+    r, c = cell
+    result = []
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:   # Up, Down, Left, Right
+        nr, nc = r + dr, c + dc
+        if not (0 <= nr < rows and 0 <= nc < cols):     # off the map
+            continue
+        if grid[nr][nc] == "#":                         # a wall
+            continue
+        result.append((nr, nc))
+    return result
+
+print("Start:", START, " neighbors:", neighbors(grid, START))
+</script>
+<script type="text/plain" id="sol-bfs">
+from collections import deque
+
+def path_to(state, reached):
+    """Follow the parents back from state to the start."""
+    path = []
+    while state is not None:
+        path.append(state)
+        state = reached[state]
+    return path[::-1]
+
+def bfs(start, goal, expand):
+    if start == goal:
+        return [start]
+    frontier = deque([start])
+    reached = {start: None}          # state -> parent
+    while frontier:
+        node = frontier.popleft()    # the oldest node
+        for child in expand(node):   # Up, Down, Left, Right; walls skipped
+            if child not in reached:
+                reached[child] = node
+                if child == goal:    # early goal test
+                    return path_to(child, reached)
+                frontier.append(child)
+    return None
+
+# Your own experiments, for example:
+# print(bfs(START, GOAL, expand))
+</script>
+<script type="text/plain" id="sol-dfs">
+from collections import deque
+
+def path_to(state, reached):
+    """Follow the parents back from state to the start."""
+    path = []
+    while state is not None:
+        path.append(state)
+        state = reached[state]
+    return path[::-1]
+
+def dfs(start, goal, expand):
+    if start == goal:
+        return [start]
+    frontier = deque([start])
+    reached = {start: None}          # state -> parent
+    while frontier:
+        node = frontier.pop()        # the newest node: the frontier is a stack
+        for child in expand(node):
+            if child not in reached:
+                reached[child] = node
+                if child == goal:
+                    return path_to(child, reached)
+                frontier.append(child)
+    return None
+</script>
+<script type="text/plain" id="sol-dls">
+def depth_limited(path, goal, expand, limit):
+    """A path to goal using at most limit more moves, 'cutoff', or None."""
+    node = path[-1]
+    if node == goal:
+        return path
+    if limit == 0:
+        return 'cutoff'
+    cut = False
+    for child in expand(node):
+        if child not in path:            # no loops on this branch
+            result = depth_limited(path + [child], goal, expand, limit - 1)
+            if result == 'cutoff':
+                cut = True
+            elif result is not None:
+                return result
+    return 'cutoff' if cut else None
+
+def iterative_deepening(start, goal, expand):
+    limit = 0
+    while True:
+        result = depth_limited([start], goal, expand, limit)
+        if result != 'cutoff':
+            return result
+        limit += 1
+</script>
+<script type="text/plain" id="sol-puzzle">
+from collections import deque
+
+GOAL = (1, 2, 3,
+        4, 5, 6,
+        7, 8, 0)                 # 0 is the blank
+BOARD = (1, 2, 0,
+         4, 8, 3,
+         7, 6, 5)                # 6 moves from GOAL
+
+def successors(board):
+    """The boards one move away: the blank moves Up, Down, Left, Right."""
+    i = board.index(0)                    # where the blank is
+    r, c = divmod(i, 3)
+    result = []
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        nr, nc = r + dr, c + dc
+        if not (0 <= nr < 3 and 0 <= nc < 3):
+            continue
+        j = nr * 3 + nc
+        b = list(board)
+        b[i], b[j] = b[j], b[i]
+        result.append(tuple(b))
+    return result
+
+# Your BFS from before, unchanged: it works for any problem.
+def path_to(state, reached):
+    """Follow the parents back from state to the start."""
+    path = []
+    while state is not None:
+        path.append(state)
+        state = reached[state]
+    return path[::-1]
+
+def bfs(start, goal, expand):
+    if start == goal:
+        return [start]
+    frontier = deque([start])
+    reached = {start: None}          # state -> parent
+    while frontier:
+        node = frontier.popleft()    # the oldest node
+        for child in expand(node):   # Up, Down, Left, Right; walls skipped
+            if child not in reached:
+                reached[child] = node
+                if child == goal:    # early goal test
+                    return path_to(child, reached)
+                frontier.append(child)
+    return None
+
+path = bfs(BOARD, GOAL, successors)
+print(len(path) - 1, "moves")
+for board in path:
+    print(board[0:3], board[3:6], board[6:9])
+</script>
+
+<script>
+"use strict";
+const SITE = "https://cs220p-labs.pages.dev/";
+
+/* Content. Each step: id (matches the lab page anchor), t = title, m = minutes, c = concept cards [name, explanation, example from the lab].
+   All numbers come from the lab pages lab1.html to lab4.html. */
+const LABS = [
+{
+  n: 1, short: "Agents", title: "Intelligent agents", when: "Thursday, week 1",
+  scenario: "Cooling controller for a 2 to 4 MW data-center hall. One knob (cooling level 0 to 10, every 10 min, 144 decisions a day). Inlet limit 27 °C. Five agents, each smarter than the last, scored against a daily budget.",
+  formulas: [
+    ["Budget", "⌈1.1 × best cost ÷ 10⌉ × 10 SAR"],
+    ["Day cost", "Σ energy × tariff + 1000 SAR per 10 min above 27 °C"],
+    ["Money left", "Σ (budget − cost) over days"],
+    ["Tariff", "0.18 night · 0.32 day · 0.48 peak 13–17 (SAR/kWh)"],
+    ["Fan power", "0.25 MW × (level ÷ 10)³"],
+    ["Energy / step", "P × 10 min = P ÷ 6 MWh"],
+    ["Filter", "T_f ← 0.5·T_f + 0.5·sensor"],
+    ["Predict", "T_pred = T_f + slope × horizon"],
+    ["Utility", "U(u) = −[elec + w_viol·1000·P(T>27) + w_wear·|u − u_prev|]"],
+  ],
+  faq: [
+    ["Why is the omniscient agent not a real agent?", "It is handed the true temperature and the exact future load and weather. No sensor gives that. It is a yardstick: its cost is the best possible cost of the day."],
+    ["Why does the budget use +10%?", "Budget = omniscient cost + 10%, rounded up to the next 10 SAR. No real agent can match perfect foresight, only come close; the 10% is the manager's allowance for not knowing the future."],
+    ["Rational = omniscient?", "No. Rational = best expected performance given the percepts and built-in knowledge. The controller cannot know the load in 10 minutes and is not blamed for it."],
+    ["Why does the thermostat oscillate?", "Cooling ramps slowly (62% of a change after 60 min) and the hall stores heat. When the sensor says hot it is already late; when it says cold the cooling is still high. Sensor noise adds flicker."],
+    ["Why can't the reflex agent stay within budget?", "Its rule sees only the current reading: no memory, no forecast, no price. Best over the 10 practice days is still −1,337 SAR (T_set 22, HIGH 10, LOW 1)."],
+    ["Why must the lookahead be about 6 steps?", "The cooling needs about an hour to respond. On day 101 (target 24) lookahead 0 gives 120 min above the limit; 6 steps (60 min) is the smallest with zero."],
+    ["Why does H = 3 fail for the utility agent?", "The horizon is shorter than the cooling ramp, so it cannot see the effect of its own action: 460 min above the limit on day 101. H = 6 has none."],
+    ["What w_viol is rational?", "1.0: the penalty weighs its true expected cost, since the measure is money. An operator might pick 2 because a violation also costs reputation, which is not in the measure."],
+    ["Why log data with a crude thermostat?", "A good controller holds the temperature flat: no variation, nothing to learn about the dynamics. Exploration vs exploitation."],
+    ["With a perfect sensor, is the hall fully observable?", "No. The future load and weather are still hidden."],
+  ],
+  steps: [
+    { id: "scenario", t: "The scenario: keep the servers cool, cheaply", m: 10, c: [
+      ["Agent", "Perceives through sensors, acts through actuators.", "Percepts: inlet temp (one noisy sensor), IT load, outside temp, price, job schedule. Action: cooling level 0 to 10."],
+      ["Agent function vs program", "Function: percept sequence → action (the math). Program: the code that implements it.", "One simulated day = 144 decisions, one every 10 min."],
+      ["PEAS / performance measure", "Performance, Environment, Actuators, Sensors. The measure is what we score, not what the agent feels.", "Bill in SAR + 1000 SAR per 10 min above 27 °C, against the day's budget."],
+      ["Rationality", "Maximize expected performance given percepts and built-in knowledge. Not omniscience.", "The controller does not know the exact load in 10 minutes."],
+      ["Daily budget", "Best possible cost of the day (omniscient agent) + 10%, rounded up to the next 10 SAR.", "Day 101: 3,905 SAR against a 4,150 SAR budget, 245 SAR under."],
+      ["Cost of cooling", "Fans grow with the cube of the level; price depends on the hour.", "Level 5 → 10 multiplies power by 2.3. At 35 °C, level 5 = 0.59 MW."],
+    ]},
+    { id: "environment", t: "Properties of the task environment", m: 15, c: [
+      ["Task environment properties", "Observable? Agents? Deterministic? Episodic? Static? Discrete? Known?", "Hall: partial, single, stochastic, sequential, dynamic, continuous (time and actions discretized), partly known."],
+      ["Partially observable", "Sensors do not give the complete state.", "One noisy sensor, no view of each rack, no exact future load."],
+      ["Sequential vs episodic", "Sequential: today's action changes later decisions.", "Heat stored now is heat later; a forced hour of cooling lasts past 08:00."],
+      ["Dynamic vs static", "Dynamic: the world changes while the agent thinks. Semidynamic: world static, clock runs.", "The hall heats up while the slow decider deliberates."],
+      ["Single vs multiagent", "Do other agents' choices affect my score?", "Single: the job scheduler is part of the environment (could become a second agent). Warehouse robots: multi."],
+    ], key: {
+      title: "Answer key: “Classify four other industrial agents” (24 cards)",
+      cols: ["Observable", "Agents", "Deterministic", "Episodic", "Static", "Discrete"],
+      rows: [
+        ["Warehouse picking robot (fulfillment center)", [
+          ["Partially", "Cameras see only the aisle ahead; shelves hide robots and people; closed bins."],
+          ["Multiagent", "Other robots and pickers block or free its path."],
+          ["Stochastic", "People step in, items slip, wheels slip."],
+          ["Sequential", "Today's route sets up the next pick; one detour delays every order."],
+          ["Dynamic", "Robots and people move while it plans."],
+          ["Continuous", "Position, speed, arm angles are real numbers."]]],
+        ["Defect-detection camera on a bottling line", [
+          ["Fully", "The photo shows cracks, fill level and cap: all it needs."],
+          ["Single agent", "Inspects alone; nothing else chooses actions."],
+          ["Deterministic", "The image fully decides the verdict; the next bottle doesn't depend on it."],
+          ["Episodic", "Each bottle is separate; rejecting one doesn't change the next."],
+          ["Static", "Also accept Semidynamic: the photo doesn't change, but a slow decision misses the reject gate."],
+          ["Continuous", "Brightness, defect size and position are measurements."]]],
+        ["Cloud autoscaler (adds or removes servers)", [
+          ["Partially", "Sees current load, not next hour's traffic or why a spike started."],
+          ["Single agent", "Also accept Multiagent: rival autoscalers compete for machines; attackers."],
+          ["Stochastic", "Users are unpredictable; the same action meets different load."],
+          ["Sequential", "Servers take minutes to boot and are paid for afterwards."],
+          ["Dynamic", "Requests keep arriving while it decides; waiting drops traffic."],
+          ["Discrete", "Also accept Continuous: whole servers, but load/latency/time are continuous."]]],
+        ["Oil-well pump controller", [
+          ["Partially", "Surface and a few downhole sensors; the reservoir is never seen."],
+          ["Single agent", "Reservoir and fluid react but have no goals."],
+          ["Stochastic", "Gas pockets, sand, reservoir changes."],
+          ["Sequential", "Over-pumping now lowers pressure and can damage the well later."],
+          ["Dynamic", "Pressure and flow change while it computes."],
+          ["Continuous", "Pump speed, pressure, flow are real numbers."]]],
+      ],
+    }},
+    { id: "beat", t: "Beat the agent: plan a day by hand", m: 10, c: [
+      ["Open-loop control", "A fixed plan that never looks at the temperature.", "Day 131 (budget 3,480): flat level 5 → 3,815 SAR, 335 over; flat 4 → 510 min above the limit."],
+      ["Greedy plan improvement", "Start safe, lower one block at a time while violations stay 0.", "Ends at 3,4,4,4,4,4,4,5,5,5,4,3: 3,228 SAR, 252 under."],
+      ["Feedback", "What the plan lacked: the current temperature. That is the next step.", "Without it, every block needs a safety margin."],
+      ["Why the omniscient copy loses", "The omniscient agent IS the best (3,157 SAR): it changes level every 10 min (72 changes). 12 sliders can't follow that timing.", "Block averages rounded up: 3,618 (138 over); to nearest: 370 min above; down: 1,180 min. Best 12-block plan 1,2,2,6,4,5,4,5,5,5,4,3 = 3,212 (268 under)."],
+    ]},
+    { id: "reflex", t: "Agent 1: simple reflex (the thermostat)", m: 15, c: [
+      ["Simple reflex agent", "Condition-action rule on the current percept only. No memory, no model.", "if T > T_set: HIGH else LOW. Three sliders."],
+      ["Table-driven agent", "Lookup table from percept sequences to actions. Astronomically large.", "Hundreds of readings × loads × prices × 144 steps. Rules replace tables."],
+      ["Why it fails here", "Correct only if the current percept holds everything that matters.", "Ramp of ~1 h + thermal mass → sawtooth. Heat wave of 2 °C breaks a safe rule (22.5/10/2)."],
+    ]},
+    { id: "model", t: "Agent 2: model-based reflex", m: 15, c: [
+      ["Model-based reflex agent", "Keeps an internal state from the percept history, updated with a sensor model and a transition model.", "State: filtered temperature, slope, last command."],
+      ["Sensor model", "How percepts relate to the true state.", "T_f ← 0.5·T_f + 0.5·sensor averages out the noise."],
+      ["Transition model", "How the world evolves and how actions change it.", "T_pred = T_f + slope × horizon (the dashed belief line)."],
+      ["Gain K / oscillation", "Correct by K × error each step. Too high K → the command swings.", "Direction changes rise with K; target 24, K 1.5, horizon 8 → 52."],
+      ["Still blind to the future", "Reacts to the batch job only once the temperature climbs.", "It ignores the schedule. Fixed in step 6."],
+    ]},
+    { id: "goal", t: "Agent 3: goal-based (pre-cool for the batch job)", m: 15, c: [
+      ["Goal-based agent", "Uses a goal + model to pick the action that leads to the goal later.", "Goal: inlet never above 27 °C, including when the batch job starts."],
+      ["Feed-forward", "Compute the cooling the future load needs, before it arrives.", "Q_needed = L_max + k_env(T_out − target); command = Q/gain + K(T_f − target)."],
+      ["Lookahead vs ramp", "Look at least as far ahead as the actuator needs.", "Day 101, target 24: lookahead 0 → 120 min above; 6 steps (60 min) → 0."],
+      ["Goals are binary", "A goal cannot say how much energy is worth a bit less risk. Utilities can.", "Is pre-cooling an hour early rational? The goal agent cannot weigh it."],
+    ]},
+    { id: "utility", t: "Agent 4: utility-based (cost vs risk)", m: 20, c: [
+      ["Utility-based agent", "Simulate each action, score the outcome, pick the highest expected utility.", "Every 10 min: try all 11 levels over H steps; U = −cost."],
+      ["Risk attitude (w_viol)", "Weight on the expected penalty. 1 = risk-neutral.", "w_viol 0 switches cooling off: 1,320 min above on day 101. 3 = paranoid, overspends."],
+      ["Horizon H", "Must cover the cooling ramp.", "H = 3 → 460 min above; H = 6 → none. 8 °C heat wave needs H 11."],
+      ["Saturated utility", "If every action looks equally doomed, utility stops guiding.", "Practice day 110, H = 12: it picks level 0 (460 min above)."],
+      ["Prices every decision", "Spends less cooling when electricity is expensive, more when cheap.", "Peak tariff 0.48 vs night 0.18 SAR/kWh."],
+    ]},
+    { id: "learning", t: "Agent 5: learning the model from data", m: 15, c: [
+      ["Learning agent", "Performance element, critic, learning element, problem generator.", "Utility agent · predicted vs measured ΔT · least-squares fit · crude thermostat logs."],
+      ["Learning the model", "Fit the constants from logged transitions instead of trusting the designer.", "Designer's guess: thermal mass 75% too high, gain 25% too high."],
+      ["Exploration", "Informative data needs variation; a perfect controller teaches nothing.", "0 days → 70 min above; 3 days → 0; ≥ 4 days → true constants."],
+      ["Autonomy", "Rely less on the designer's prior, more on own experience.", "Money left: −8,699 (0 days), 1,680 (3 days), 1,348 (≥ 4 days)."],
+    ]},
+    { id: "measure", t: "Rationality and the performance measure", m: 10, c: [
+      ["Rationality is relative to the measure", "Change the measure, change the winner.", "Energy only: cooling off wins (1,326 min above/day). Never violate: 5 agents tie at 0, full blast among them."],
+      ["Reward what you want", "Measure the state of the world, not a proxy.", "\"Minimize energy\" → switch off. \"Never exceed 27 °C\" → full blast."],
+      ["Omniscient reference", "Knows the exact future. Best possible cost, not achievable.", "Its cost × 1.1 = the plant manager's budget."],
+    ]},
+    { id: "tournament", t: "Tournament: the cooling league", m: 20, c: [
+      ["Cooling league", "10 hidden days; last two are heat waves (+5 °C). One official run.", "Score = money left: Σ (budget − cost). Above 0 = beat the budget."],
+      ["Pick and tune an agent", "Any agent from steps 4 to 8, tuned on practice days 101 to 110.", "Look for a run with no big red day, not just the highest total."],
+      ["Penalty dominates", "1,000 SAR per 10 min above 27 °C.", "One bad afternoon wipes out a week of savings."],
+    ]},
+  ],
+},
+{
+  n: 2, short: "Search", title: "Solving problems by searching", when: "Thursday, week 1",
+  scenario: "A delivery robot on campus maps (warehouse, maze, open hall, office). BFS, DFS, depth-limited and iterative deepening; a submitted report card; students program BFS and DFS in Python; then the 8-puzzle and a warehouse dispatch league.",
+  formulas: [
+    ["Nodes to depth d", "b + b² + … + b^d"],
+    ["BFS", "time O(b^d) · space O(b^d)"],
+    ["DFS", "time O(b^m) · space O(bm)"],
+    ["DLS", "time O(b^ℓ) · space O(bℓ)"],
+    ["IDS", "time O(b^d) · space O(bd)"],
+    ["Bidirectional", "O(b^(d/2)) time and space"],
+    ["IDS overhead", "≈ b/(b−1)   (b=10: ~11%)"],
+    ["8-puzzle", "181,440 reachable states"],
+    ["Lecture costs", "1M nodes/s · 1 KB/node"],
+  ],
+  faq: [
+    ["Why does BFS find the fewest moves?", "It expands every node at depth d before any at d+1. When it first reaches the goal, every shorter path has already been tried."],
+    ["Why is the DFS path so long?", "It keeps the first branch that happens to reach the goal. Campus Library → Cafeteria: 98 moves vs BFS 28; the 117 cells still on the stack are side branches it never needed."],
+    ["Is DFS complete? (report card)", "The card asks about the general, tree-like algorithm: no, it can loop forever. Graph DFS with a reached table on a finite map is complete. This is the most common slip."],
+    ["Mark reached when added or when taken out?", "When added. Otherwise a cell enters the frontier more than once: Open room BFS needs 13 steps instead of 10, three copies thrown away."],
+    ["My Python BFS has more expansions than 283. Why?", "Usually it marks a cell reached when popped instead of when generated: more expansions, same path. Other typical bugs: walls or the map edge missing in expand(), the path returned backwards."],
+    ["Why use iterative deepening if it repeats work?", "Most nodes are at the deepest level, so the repeats are cheap (~11% at b = 10). It gets BFS's fewest moves with DFS's memory, O(bd)."],
+    ["Why BFS for the knight but any search for counting objects?", "The knight wants the fewest moves: only BFS guarantees that. Counting objects only needs every pixel of a group visited once; any complete search works, and DFS uses little memory."],
+    ["Why does BFS on the robot's chip lose money?", "Its reached table passes 150 nodes on any far shelf: out of memory, order missed (−25 SAR). Defaults: 20 of 34 deliverable orders, −163 SAR. Memory runs out long before time."],
+    ["Is there one tournament setting that wins every warehouse?", "No. IDS on the chip wins warehouse 1, bidirectional on the chip warehouse 2, BFS on the cloud warehouse 3. The total rewards the setting that is good everywhere: IDS ℓ 40 on the chip, 819 SAR."],
+    ["What does the reached table buy?", "Less work (Depot → Library: 14 vs 206 expansions with no checks) and termination: graph BFS proves \"no path\" after 369; tree BFS hits the 30,000 limit."],
+  ],
+  steps: [
+    { id: "formulation", t: "Problem formulation: a map is a graph", m: 10, c: [
+      ["Problem formulation", "States, initial state, actions, transition model, goal test, path cost.", "States: free cells. Actions: Up, Down, Left, Right if free. Cost 1 per move."],
+      ["expand() is the interface", "The search never sees the picture: it only calls expand(cell).", "Each yielded child adds an edge; walls and the map edge get a red ✕."],
+      ["State space as a graph", "Node = free cell, edge = move. Edges = states − 1 means a tree.", "Corner: 17 nodes, 17 edges. Campus 458/777. Maze 305/304: a tree."],
+      ["State abstraction", "Keep only what the goal and the cost depend on.", "Carrying two orders → the state must include them."],
+      ["No solution", "A goal can be a state yet unreachable.", "Office, goal Server room: no door. Gate closed: 369 cells reachable, 84 inside the courtyard."],
+    ]},
+    { id: "report", t: "Report card: the uninformed strategies", m: 9, c: [
+      ["Four questions per strategy", "Complete? Optimal (every move costs 1)? Time? Space? For BFS, DFS, depth-limited, iterative deepening.", "Watch the race, then fill all 16 cards and submit once."],
+      ["Submitted quiz (L2/reportcard)", "Name and team on top, no feedback until Submit, once per device; time taken is logged.", "Results are private: Admin (TA) on the leaderboard, Class activities."],
+      ["The race", "Moves / expanded / max frontier on the same trip.", "Campus Library → Cafeteria: BFS 28/283/17 · DFS 98/341/131 · IDS 28/18,873/52."],
+      ["Most common slip", "DFS complete? The card means the general, tree-like DFS: no.", "Graph DFS on a finite map is complete."],
+    ], key: {
+      title: "Answer key: report card (16 cards)", head: "Strategy",
+      cols: ["Complete", "Optimal", "Time", "Space"],
+      rows: [
+        ["Breadth-first", [["Yes", ""], ["Yes", "every move costs 1"], ["O(b^d)", ""], ["O(b^d)", ""]]],
+        ["Depth-first", [["No", "tree-like DFS can loop"], ["No", ""], ["O(b^m)", ""], ["O(bm)", ""]]],
+        ["Depth-limited", [["No", "fails if ℓ < d"], ["No", ""], ["O(b^ℓ)", ""], ["O(bℓ)", ""]]],
+        ["Iterative deepening", [["Yes", ""], ["Yes", ""], ["O(b^d)", ""], ["O(bd)", ""]]],
+      ],
+    }},
+    { id: "frontier", t: "The frontier: queue or stack", m: 13, c: [
+      ["Generic search loop", "Take a node out, add its new neighbors. Only which node comes out differs.", "Pause the side-by-side animation: \"Which cell leaves next?\""],
+      ["Queue vs stack", "FIFO: oldest out first (BFS). LIFO: newest out first (DFS).", "Open room: BFS takes out 18, queue ≤ 4; DFS 16, stack grows to 9. Both 7 moves."],
+      ["Frontier size", "BFS holds a ring; DFS holds the side branches it passed.", "Campus BFS queue ≤ 17. Open hall, BFS from the Bar: peaks at 35."],
+      ["Empty frontier = failure", "The loop proves there is no path.", "Office, goal Server room: empty after 435 expansions from the Entrance."],
+    ]},
+    { id: "bfs", t: "Breadth-first search", m: 10, c: [
+      ["BFS", "Expand every node at depth d before d + 1: rings, fewest moves.", "Room with a wall: 24 taken out, 29 reached, G at depth 8, queue ≤ 8."],
+      ["Optimal only for equal costs", "BFS counts moves, not minutes.", "Stairs that take longer would break it."],
+      ["Cost O(b^d)", "Time and memory both exponential; the frontier holds a whole layer.", "Library → Cafeteria 28 moves, 283 expansions; Depot → Sports hall 46, 442."],
+      ["Early goal test", "Test when generated, not when expanded: saves a layer.", "BFS stops when it adds G (hand-run rules and the Python exercise)."],
+      ["Completeness includes failure", "BFS must also report \"no path\".", "Gate closed: stops after 369 expansions."],
+    ]},
+    { id: "dfs", t: "Depth-first, depth-limited and iterative deepening", m: 14, c: [
+      ["DFS", "Takes the cell added last: dives to a dead end, backs up. Keeps the first path.", "\"Long way round\": 14 moves after 19 expansions where BFS needs 4."],
+      ["DFS on the campus", "Graph DFS, Right popped first.", "Library → Cafeteria: 98 moves, 341 expansions, stack peaks at 131 (117 left)."],
+      ["DFS in a maze", "One path per corridor: diving is not bad.", "Entrance → Exit: DFS 109 expansions, BFS 156, same 108 moves."],
+      ["Depth-limited search", "DFS that stops at depth ℓ. Finds nothing if ℓ < d.", "Warehouse Dock → Office: ℓ = 48 nothing, ℓ = 49 finds 49 moves."],
+      ["Iterative deepening", "ℓ = 0, 1, 2, …: shortest path with DFS memory, repeats shallow levels.", "Same map finds 4 moves at ℓ = 4. Campus: 18,873 expansions vs BFS 283."],
+      ["Cut-off vs failure", "Only an iteration with no cut-off proves \"no path\".", "Gate closed: IDS stops at ℓ = 42 (59,249 expansions)."],
+    ]},
+    { id: "code", t: "Program it: BFS and DFS in Python", m: 25, c: [
+      ["Same names as the animations", "frontier = deque([start]), reached = {start: None} (state → parent).", "popleft() for BFS, pop() for DFS."],
+      ["Four tabs, in order", "1 expand() · 2 BFS · 3 DFS · 4 depth-limited (stretch goal).", "Tested on the campus and on the campus with the gate closed."],
+      ["Typical bugs", "Reached marked when popped (more expansions, same path); walls or map edge missing in expand(); path backwards.", "Expected: BFS 28 moves after 283 expansions; gate closed: None after 369."],
+      ["TA: Python setup", "Python loads the first time someone presses Run: a few seconds, needs the internet once.", "Solutions below; students no longer see them. DFS and 8-puzzle start from the student's own BFS (pasted in)."],
+    ]},
+    { id: "byhand", t: "You are the search: BFS and DFS by hand", m: 8, c: [
+      ["Timed challenge (5 min)", "Students click the cell that leaves the frontier, then the neighbors it adds. BFS, then DFS, then 3 questions.", "BFS 10 steps (21 clicks), DFS 14 steps (28 clicks)."],
+      ["By-hand rules", "Neighbors in order Up, Down, Left, Right. A cell is reached when added, never added again.", "BFS stops when it adds G; DFS when it takes G out."],
+      ["Steps vs path length", "BFS returns the shorter path; DFS takes out more cells.", "BFS: S E H J K L G, 6 moves. DFS: S A B C D F I N M L G, 10 moves."],
+      ["Why E stays at the bottom", "DFS always takes the cell added last.", "S adds E then A; DFS takes A and dives on. E is still waiting when G comes out."],
+      ["Score out of 9", "3 points per round for correct clicks, 1 per correct answer, −0.25 per wrong click, never below 0.", "2nd wrong click on a move shows a rule hint; the 3rd marks the right cell."],
+      ["Classic mistake", "Marking a cell reached only when it is taken out.", "BFS: 13 steps instead of 10, three copies thrown away."],
+      ["TA: class results", "Class results: activity.html#L2/byhand (live; Admin box deletes/resets).", "Afterwards ask which mistakes were most common: the mistake tally per round is in the results.", "https://cs220p-labs.pages.dev/activity.html#L2/byhand"],
+    ]},
+    { id: "applied", t: "BFS and DFS at work: fills, knights, words and folders", m: 10, c: [
+      ["Search without a map", "BFS and DFS need only a start, a goal test and expand(state).", "COLD → WARM: 4 changes, 24 words taken out."],
+      ["Paint bucket / oil slick (BFS)", "States are same-color pixels; the fill grows in rings around the click.", "Slick: 137 px = 0.34 km², 13 rings, largest queue 19."],
+      ["Knight moves (BFS)", "The move rule generates the neighbors; the graph is never stored.", "a1 → h8: 6 moves. Ten squares are exactly 5 moves from a1."],
+      ["Word ladder (BFS)", "States are words; an action changes one letter into another word.", "CALL → LOST: 13 changes. COLD → QUIZ: no ladder."],
+      ["Count objects (DFS)", "Objects are connected groups of pixels; any complete search counts them.", "5 islands. Roof: 18 panels but 15 objects (three pairs touch)."],
+      ["Folder sizes (DFS)", "A folder's size is known only when all its subfolders are done.", "Home: 8.1 GB in 16 folders, at most 4 open at a time."],
+      ["Build order (DFS)", "A task goes in after everything it needs; a cycle means no order exists.", "\"Features also needs Train\": cycle after 19 steps."],
+    ]},
+    { id: "treesearch", t: "Tree search vs graph search", m: 7, c: [
+      ["Graph search", "Keep a reached table: each cell expanded once. Costs memory.", "Depot → Library, BFS: 14 expansions."],
+      ["Tree search", "No table: redundant paths (↺) and loops become new nodes.", "Path check only: 22. No checks: 206. Same 7 moves."],
+      ["Redundant paths", "Every cell is expanded again for every path that reaches it. A maze has none.", "Maze, DFS with path check: 109 = 109."],
+      ["Termination", "Only graph search can prove \"no path\" on a finite graph.", "Gate closed: graph BFS 369; tree BFS hits the 30,000 limit."],
+    ]},
+    { id: "blowup", t: "How fast does it blow up?", m: 6, c: [
+      ["Exponential growth", "Each layer is bigger than all layers above it together.", "b = 3 to depth 4: 1 + 3 + 9 + 27 + 81 = 121 nodes."],
+      ["Memory runs out first", "At 1 KB per node, memory fails long before time.", "b = 10: depth 6 ≈ 1 GB, depth 8 ≈ 111 GB (> 16 GB)."],
+      ["Faster computers barely help", "1000× faster: time column drops 1000-fold, memory unchanged.", "b = 10, depth 12: about 13 days and 1 PB."],
+      ["IDS memory", "Keeps b·d nodes: kilobytes.", "b = 3, depth 16: IDS does 1.5× BFS's work."],
+    ]},
+    { id: "puzzle", t: "Another problem, same algorithms: the 8-puzzle", m: 14, c: [
+      ["8-puzzle formulation", "State: tiles on 9 squares. Action: move the blank. Goal: 1 to 8, blank last. Cost 1.", "181,440 boards reachable from any start."],
+      ["Only expand() changes", "The search loop is the one students already wrote.", "Medium (16 moves): BFS ~6,600 expansions, 10,600 in memory."],
+      ["IDS memory win", "Keeps only the current path.", "Medium: 17 boards in memory, ~48,000 expansions. Hard (24): gives up."],
+      ["Bidirectional win", "On a real branching tree the square root shows.", "Medium ~300 expansions; Hard ~2,200 (BFS keeps ~130,000 boards)."],
+      ["Unsolvable start", "Half the boards cannot reach the goal.", "BFS exhausts all 181,440 boards; bidirectional: no solution after 297,528."],
+    ]},
+    { id: "tournament", t: "Tournament: the warehouse dispatch league", m: 17, c: [
+      ["Dispatch league", "Three visible warehouses, 12 orders each: dock → a shelf with the item, there and back.", "Seeds 36, 56, 12: 38 × 21, 47 × 17, 56 × 25 cells. Warehouses 2 and 3 have one sealed-aisle order each."],
+      ["Official = practice", "The server recomputes the same three warehouses with the submitted settings, once per device.", "The official score is exactly the practice score."],
+      ["Algorithms and memory", "BFS, DFS and bidirectional keep their reached tables. DLS and IDS keep only the current route.", "ℓ for DLS and IDS."],
+      ["Planning hardware", "Chip: free, 150 nodes, 2,000 exp/s. Edge: 25 SAR per warehouse, 400 nodes, 20,000 exp/s. Cloud: 2 SAR/plan + 2 s, unlimited, 1M exp/s.", "The cloud solves memory for 2 SAR per plan."],
+      ["Scoring: SAR profit", "+30 per delivered order, −0.10 per busy second (1 s per move both ways, plus planning), −25 per missed order, fees.", "Missed = out of memory, gave up after 200,000 expansions, or beyond ℓ. A proven no-route costs nothing."],
+      ["Why IDS ℓ 40 on the chip wins", "All 34 delivered on the shortest routes in ≤ 41 nodes; free hardware.", "819 SAR. It cannot prove the two sealed aisles."],
+      ["Why BFS on the chip fails", "The reached table passes 150 nodes on any far shelf.", "Defaults: −163 SAR, 20 of 34 deliverable orders out of memory."],
+    ]},
+  ],
+},
+{
+  n: 3, short: "Data", title: "Data and data quality", when: "Sunday, week 1",
+  scenario: "A campus student survey: 300 students, 10 attributes, generated so the true clean version is known. Inject typos, duplicates, entry errors and missing values, then measure the damage each cleaning choice does.",
+  formulas: [
+    ["MSE", "bias² + variance"],
+    ["z-score", "z = (x − mean) ÷ sd; flag |z| > k"],
+    ["IQR fences", "[Q1 − 1.5·IQR, Q3 + 1.5·IQR]"],
+    ["Sampling error", "∝ 1/√n  (4× data → ½ error)"],
+    ["Skewed counts", "log(1 + x)"],
+    ["PCA", "X = U S Vᵀ on centered X; columns of V = axes"],
+    ["Types", "nominal = ≠ · ordinal < > · interval + − · ratio × ÷"],
+    ["Tournament", "sleep/major 40% · rows 20% · corr 20% · commute 10% · coffee 10%"],
+  ],
+  faq: [
+    ["Why can't I average satisfaction (1 to 5)?", "It is ordinal: order is meaningful, differences are not. Use the median. 4 is not \"twice as satisfied\" as 2."],
+    ["Is 20 °C twice as warm as 10 °C?", "No. Celsius is interval, no true zero. In Kelvin the lab's 24 ÷ 12 ratio drops from 2 to 1.04."],
+    ["Is the student id useful?", "No. 300 distinct ids for 300 students: it identifies but describes nothing. Drop it (feature selection)."],
+    ["Is an outlier the same as noise?", "No. A student who sleeps 4 h is real and interesting. Sleep = 70 h is an entry error. Do not delete outliers blindly."],
+    ["Why prefer IQR over the z-rule?", "Errors inflate the sd that should catch them (masking): the |z| > 3 fence moves from 9.45 h to 38.95 h. IQR fences barely move."],
+    ["Mean imputation keeps the mean, so it's fine?", "It shrinks the variance and dilutes correlations: corr(study, gpa) 0.76 → 0.65 at 30% missing."],
+    ["Which strategy fixes missing-not-at-random?", "None. True mean 6.50 h; eliminate 6.64, mean 6.70, median 6.68, ignore 6.70. You need a model of why values are missing."],
+    ["Can I just delete duplicates?", "Not always. Copies can hold different correct info: 15 of 28 duplicated ids disagree on commute_min. Decide which wins, or merge."],
+    ["Why stratified sampling?", "Small groups are not lost. n = 15: random draw gives ME and Bio one student each; stratified gives 3 each."],
+    ["Why must PCA center the data?", "Without centring PC1 points at the mean (67°), not along the spread (45°, 88.2%)."],
+    ["Why normalize before PCA?", "sd of study_hours (5.99) dwarfs gpa (0.41): PC1 lies at 3° and claims 99.8%."],
+  ],
+  steps: [
+    { id: "intro", t: "What is data mining, and what is data?", m: 10, c: [
+      ["Data mining", "Non-trivial extraction of implicit, unknown, useful patterns from data.", "300-student survey, 10 attributes, with a known clean truth."],
+      ["Prediction vs description", "Prediction: classification, regression. Description: clustering, anomalies, associations.", "Predict major or GPA vs find groups of similar students."],
+      ["Objects and attributes", "Object = row (record, instance). Attribute = column (feature, dimension).", "One student = one row; sleep_hours = one column."],
+      ["Identifier carries no information", "A unique id per object describes nothing.", "300 distinct ids for 300 students. Removing it = feature selection."],
+    ]},
+    { id: "types", t: "Attribute types and what you may compute", m: 15, c: [
+      ["Nominal", "Only = ≠. Mode, entropy, contingency tables.", "major, zip code, ID."],
+      ["Ordinal", "Order < >. Median, percentiles, rank correlation.", "satisfaction 1 to 5, year of study."],
+      ["Interval", "Differences meaningful, no true zero. Mean, sd, Pearson.", "ac_temp_c in °C, calendar dates."],
+      ["Ratio", "True zero: ratios meaningful. Geometric mean, % change.", "hours, counts, money, Kelvin, age. coffee_cups is ratio and discrete."],
+      ["Transformation test", "Apply an information-preserving change; see which statements survive.", "Hours→minutes, °C→°F, relabel satisfaction. Kelvin: 24 ÷ 12 becomes 1.04."],
+    ]},
+    { id: "datasets", t: "Discrete or continuous, and kinds of datasets", m: 10, c: [
+      ["Discrete vs continuous", "Countable values vs real numbers.", "Discrete: id, major, year, satisfaction, coffee_cups."],
+      ["Asymmetric attributes", "Only non-zero values matter; shared zeros say nothing.", "Two students with no courses: simple matching 100%, Jaccard 0 ÷ 0."],
+      ["Dataset characteristics", "Dimensionality, sparsity, resolution.", "Hourly vs daily data show different patterns."],
+      ["Kinds of datasets", "Record, graph, ordered (sequences, time series, spatial).", "Phone: contacts, WhatsApp groups, step counter, maps."],
+      ["Autocorrelation", "Ordered data: neighbors in time or space are alike.", "Shuffle the days: mean and sd stay, lag-1 autocorrelation collapses."],
+    ]},
+    { id: "measurement", t: "Measurement error: precision, bias, accuracy", m: 10, c: [
+      ["Precision", "How close repeated measurements are to each other (sd).", "A scale that always reads 2 kg too much: precise, biased."],
+      ["Bias", "Systematic gap between the mean measurement and the truth. Fix: calibrate.", "Averaging 16 readings leaves the bias near 0.5 h."],
+      ["Accuracy (MSE)", "Closeness to the truth. MSE = bias² + variance.", "Zero noise: sd 0, MSE = bias² = 1.00."],
+      ["Noise vs artifact", "Noise: random error, average it. Artifact: deterministic distortion.", "16 readings: sd 0.97 → 0.25 h, MSE 1.28 → 0.30."],
+    ]},
+    { id: "outliers", t: "Noise vs outliers", m: 15, c: [
+      ["Outlier", "Considerably different from the rest. Can be legitimate.", "Sleeps 4 h: real. Sleep = 70 h: entry error."],
+      ["Mean vs median", "Mean runs after outliers; median stays put.", "20 errors: mean 6.50 → 8.08 h, median stays 6.50."],
+      ["z-score rule (fragile)", "Flag |x − mean| > k·sd. The outlier inflates the sd: masking.", "|z| > 3 fence: 9.45 → 38.95 h; a 30 h error would hide."],
+      ["IQR rule (robust)", "Flag outside [Q1 − 1.5 IQR, Q3 + 1.5 IQR].", "Fences 3.85–9.05 h → 3.55–9.55 h with errors."],
+      ["False flags", "Tight rules flag real students.", "|z| > 2 flags 14 real students with no errors at all."],
+    ]},
+    { id: "missing", t: "Missing values", m: 15, c: [
+      ["Missing-value strategies", "Eliminate, estimate (mean, median, model), or ignore per statistic.", "Compare all four at 30% missing."],
+      ["Mean imputation", "Keeps the mean, shrinks variance, flattens correlations.", "corr(study, gpa): 0.76 → 0.65 (30%), 0.53 (60%)."],
+      ["Missing not at random", "Why it is missing matters. Simple strategies are then biased.", "Short sleepers skip the question: estimates 6.64 to 6.70 vs true 6.50."],
+      ["Column entirely missing", "No strategy recovers an attribute never observed.", "Edge case button in the lab."],
+    ]},
+    { id: "duplicates", t: "Inconsistent values and duplicates", m: 10, c: [
+      ["Inconsistent values", "One value written many ways. Standardize: trim, lower-case, map synonyms.", "CS, cs, Comp Sci, C.S. Naive CS count 36; true 64."],
+      ["Duplicates", "Same object recorded twice. Dedupe on the id, then decide which copy wins.", "Standardized 65 → deduplicated 64."],
+      ["Conflicting copies", "Two copies can both be correct (old and new address).", "15 of 28 duplicated ids disagree on commute_min."],
+      ["Checksums", "Built-in check digits catch typos automatically.", "IBAN, ISBN."],
+    ]},
+    { id: "sampling", t: "Aggregation and sampling", m: 15, c: [
+      ["Aggregation", "Combine objects: smaller data, new scope, more stable values.", "Students into majors; daily into monthly."],
+      ["Representative sample", "Roughly the same properties as the population.", "62 of 300 are Chem: expect ~6 in a sample of 30."],
+      ["Stratified sampling", "Sample each group separately so small groups survive.", "Smallest major always ≥ 3: n = 15 stratified vs n = 40 random."],
+      ["Progressive sampling", "Grow n until accuracy flattens. Error ∝ 1/√n.", "Error 0.125 h at n = 25, 0.054 h at n = 100."],
+    ]},
+    { id: "transform", t: "Transformations: normalize, discretize, binarize", m: 15, c: [
+      ["Standardization", "x' = (x − mean) ÷ sd. Stops big-range attributes dominating distances.", "commute 2 to 90 min vs GPA 1.5 to 4. Constant column: sd 0, undefined."],
+      ["Log transform", "Folds a long right tail. log(1 + x) when zeros exist.", "commute_min skewness 1.7 → 0.02. 36 students drink no coffee."],
+      ["Discretization", "Equal width, equal frequency (unsupervised) or class-pure splits (supervised).", "sleep, 4 bins: width 70/136/83/11 vs frequency 74/72/72/82."],
+      ["Binarization / one-hot", "m categories → m binary attributes (asymmetric).", "major → one column per major."],
+    ]},
+    { id: "dimensions", t: "Dimensionality: the curse and PCA", m: 15, c: [
+      ["Curse of dimensionality", "In high d nearest and farthest neighbors are almost equally far.", "Ratio nearest ÷ farthest: 0.005 at d = 1 → 0.70 at d = 60."],
+      ["Feature selection", "Keep a subset: drop redundant and irrelevant attributes.", "Drop the student id."],
+      ["PCA", "New orthogonal axes ordered by variance; via SVD of centered data.", "PC1 at 45° (scaled) captures 88.2%: a \"diligence\" axis."],
+      ["Centring trap", "Without centring, PC1 points at the mean.", "PC1 swings to 67°."],
+      ["Normalize first", "Big-scale attributes hijack PC1.", "Unnormalized: PC1 at 3°, 99.8% (study sd 5.99 vs gpa 0.41)."],
+    ]},
+    { id: "tournament", t: "Tournament: the cleaning challenge", m: 20, c: [
+      ["Cleaning pipeline", "Labels → duplicates → outlier rule + action → missing values, in that order.", "Practice surveys 21 to 23; one official run on 5 hidden surveys."],
+      ["Scoring", "Closeness of summary statistics to the hidden clean truth.", "Sleep per major 40%, rows 20%, corr(study, gpa) 20%, commute 10%, coffee 10%."],
+      ["The trap", "Missing values are not at random; outlier actions change row counts.", "Students send their code to the TA."],
+    ]},
+  ],
+},
+{
+  n: 4, short: "Similarity", title: "Similarity and distance", when: "Sunday, week 1",
+  scenario: "A gas plant's pump trips. Diagnose it by the most similar past trip: sensor readings (numeric), alarm codes (binary), technician notes (text), vibration trends (time series). 5 root causes.",
+  formulas: [
+    ["Minkowski", "d = (Σ |xᵢ − yᵢ|^r)^(1/r)   r = 1, 2, ∞"],
+    ["SMC", "(f11 + f00) ÷ (f00 + f01 + f10 + f11)"],
+    ["Jaccard", "f11 ÷ (f01 + f10 + f11)"],
+    ["Cosine", "x·y ÷ (‖x‖ ‖y‖)"],
+    ["Ext. Jaccard", "x·y ÷ (‖x‖² + ‖y‖² − x·y)"],
+    ["Pearson", "cov(x, y) ÷ (sₓ s_y)"],
+    ["z-score", "(x − mean) ÷ sd"],
+    ["Mahalanobis", "√((x − y) Σ⁻¹ (x − y)ᵀ)"],
+    ["s ↔ d", "s = 1 ÷ (1 + d)  or  s = 1 − d ÷ d_max"],
+    ["Triangle", "d(x, z) ≤ d(x, y) + d(y, z)"],
+  ],
+  faq: [
+    ["Is Jaccard a metric?", "Jaccard is a similarity: it only has positivity and symmetry. The Jaccard distance 1 − J is a metric (Going deeper)."],
+    ["Is 1 − cosine a metric?", "No. (2, 3) and (4, 6) get distance 0 though different, and it fails the triangle inequality. √(2(1 − cos)) is a metric."],
+    ["Is squared Euclidean a metric?", "No. With y at the midpoint: d(x, z) = 52 > 13 + 13."],
+    ["Why Jaccard, not SMC, for alarms?", "Alarms are asymmetric: two trips that both stayed silent share nothing. Add 200 silent tags and SMC goes to ~0.98 for every pair; Jaccard does not move."],
+    ["Why standardize the sensors?", "Flow (100–650 m³/h) dwarfs vibration (1–12 mm/s). Nearest trip has the right cause 32% raw, 52% standardized (guessing: 20%)."],
+    ["Why did the \"obvious\" weights get worse?", "Flow 0.3, vibration and bearing temp 2 → 42%: flow is what separates motor faults (low flow). Weights must be checked against data."],
+    ["Why cosine for notes?", "It compares direction, not length. A note pasted 3× has the same cosine; Euclidean punishes long notes."],
+    ["Correlation or Euclidean for trends?", "Shape matters (failure signature): correlation. Absolute level matters (alarm limit): Euclidean."],
+    ["Why Mahalanobis for the alarm?", "Flow and pressure move together along the pump curve. Along the curve it barely moves; 5 bar off the curve it jumps."],
+    ["When is a measure undefined?", "Cosine: zero vector (empty note, only stop words). Jaccard: no alarms on either trip (0/0). Correlation: sd 0 (frozen sensor)."],
+  ],
+  steps: [
+    { id: "why", t: "Why similarity? A pump trips", m: 10, c: [
+      ["Similarity vs dissimilarity", "Similarity in [0, 1], 1 = identical. Distance ≥ 0, 0 = identical, no upper bound.", "Convert: s = 1/(1 + d) or s = 1 − d/d_max."],
+      ["Case-based diagnosis", "Diagnose by the root cause of the most similar past case.", "Most similar past trip was bearing wear → check the bearing first."],
+      ["Measure depends on type", "Differences for numbers, matching for binary, angles for text.", "Sensors, alarm codes, technician notes, vibration trend."],
+      ["Leave the query out", "Every object is most similar to itself.", "A trip vs itself: distance 0, similarity 1."],
+    ]},
+    { id: "minkowski", t: "Euclidean, Manhattan, supremum: the Minkowski family", m: 15, c: [
+      ["Manhattan (L1, r = 1)", "Sum of absolute differences. Hamming = L1 on binary.", "Total deviation summed over all sensors; a forklift along aisles."],
+      ["Euclidean (L2, r = 2)", "Straight-line distance.", "Unit ball is a circle; L1 a diamond; L∞ a square."],
+      ["Supremum (L∞, r = ∞)", "Largest single-attribute difference.", "Alarm limits: one sensor out of range is enough."],
+      ["Rankings change with r", "The nearest neighbor depends on the metric.", "y = (9, 5): p2 7 vs p4 8 at r = 1; p2 6 vs p4 5 at r = ∞."],
+      ["r < 1", "Not a metric: a detour can be shorter.", "r = 0.5 edge case."],
+    ]},
+    { id: "metric", t: "What makes a distance a metric", m: 10, c: [
+      ["Metric properties", "Positivity (0 only if equal), symmetry, triangle inequality.", "One failure disproves; a passing check proves nothing."],
+      ["Why metrics matter", "The triangle inequality lets search prune provably far cases.", "Case retrieval can skip past trips that must be far."],
+      ["Asymmetric measures", "d(x, y) ≠ d(y, x).", "Steep access road up vs down; 1 PM → 2 PM = 1 h, 2 PM → 1 PM = 23 h."],
+      ["Symmetrize", "s'(x, y) = (s(x, y) + s(y, x)) ÷ 2.", "Confusion of 0 and o."],
+      ["Non-metrics you use", "Squared Euclidean, 1 − cosine, set difference.", "Squared Euclidean at the midpoint: 52 > 13 + 13."],
+    ]},
+    { id: "scaling", t: "Sensors with different ranges: standardize first", m: 15, c: [
+      ["Scale dominance", "The attribute with the biggest numbers decides the distance.", "Flow 100–650 m³/h vs vibration 1–12 mm/s, pressure 25–60 bar."],
+      ["Standardize (z-scores)", "Subtract the mean, divide by the sd. Robust: median and absolute deviation.", "Correct root cause: 32% raw → 52% standardized (guess 20%)."],
+      ["Weights", "Weighting says which attributes matter. Check against data.", "Vib, bearing temp, flow 1.5, pressure 0.5 → 58%. Flow 0.3 → 42%."],
+      ["Ties", "All weights 0: every trip ties, no diagnosis.", "Only vibration: a genuine tie for nearest."],
+    ]},
+    { id: "binary", t: "Alarm codes: simple matching vs Jaccard", m: 15, c: [
+      ["Simple matching (SMC)", "Shared zeros count as agreement. For symmetric attributes.", "Yes/no answers on an inspection checklist."],
+      ["Jaccard", "Ignores shared zeros. For asymmetric, sparse attributes.", "Alarm codes: both not raising \"Seal leak\" means nothing."],
+      ["Shared-zero problem", "Add silent attributes: SMC → 1 for everyone.", "200 silent tags: average SMC 0.70 → ~0.98. Jaccard unchanged."],
+      ["Lecture example", "x = (1,0,0,0,0,0,0,0,0,0), y = (0,0,0,0,0,0,1,0,0,1).", "SMC = 0.7, Jaccard = 0. Two trips with no alarms: J = 0/0."],
+    ]},
+    { id: "cosine", t: "Technician notes: cosine similarity", m: 20, c: [
+      ["Bag of words", "A note becomes a vector of word counts. Sparse, high-dimensional.", "Rank the 6 FMEA failure modes against a new note."],
+      ["Cosine similarity", "Angle between vectors: direction, not length. 1 same, 0 no shared words.", "Lecture: 5 ÷ 14.51 = 0.31. Note 3× longer: cosine unchanged."],
+      ["Stop words", "Common words add to every dot product and say nothing.", "the, and, was. \"pump\" is a domain stop word (TF-IDF)."],
+      ["Extended Jaccard (Tanimoto)", "x·y ÷ (‖x‖² + ‖y‖² − x·y). Alternative for counts.", "Tournament option for notes."],
+      ["Zero vector", "Empty note or only stop words: cosine = 0/0.", "No shared word with FMEA: six-way tie at 0."],
+    ]},
+    { id: "correlation", t: "Vibration trends: same shape, different level", m: 10, c: [
+      ["Pearson correlation", "Linear relationship after removing mean and scale. In [−1, 1].", "Small and big pump developing the same fault."],
+      ["Shape vs level", "Correlation ignores offset and gain; Euclidean does not.", "Offset 5, gain 2: corr 1, Euclidean \"far\"."],
+      ["Negative correlation", "Same shape upside down.", "Gain −1: a sensor wired with the wrong sign, corr −1."],
+      ["Flat signal", "sd 0: correlation undefined.", "A frozen sensor reads a constant."],
+    ]},
+    { id: "mahalanobis", t: "Correlated sensors: Mahalanobis distance", m: 10, c: [
+      ["Mahalanobis distance", "Uses the covariance Σ to rescale and rotate: Euclidean in whitened space.", "Healthy flow vs pressure: a tilted ellipse along the pump curve."],
+      ["Along vs off the curve", "Along: different operating point. Off: something is wrong.", "Along: Mahalanobis barely moves. 5 bar below: it jumps, alarm fires."],
+      ["Reduces to Euclidean", "Uncorrelated, equal variance → Euclidean. Different scales → standardizes for you.", "Lecture: D_M = 6 where D_E = 14.7."],
+      ["Spec the boundary", "\"> 3\" vs \"≥ 3\" decides a reading exactly on the contour.", "Edge case: on contour 3 the \"> 3\" alarm stays silent."],
+    ]},
+    { id: "tournament", t: "Tournament: the diagnosis league", m: 20, c: [
+      ["Diagnosis league", "60 past trips, 30 new; diagnosis = cause of the most similar past trip.", "Points = 1000 × share correct. Practice 3 rounds; official run on 5 hidden."],
+      ["Design choices", "Sensor distance, standardize, SMC or Jaccard, cosine or ext. Jaccard, stop words, 3 weights (0 to 3).", "Alarms compared over all 60 tags, most silent."],
+      ["What steps 4 to 6 taught", "Standardize the sensors, Jaccard for sparse alarms, remove stop words from notes.", "Students send their code to the TA."],
+    ]},
+  ],
+},
+];
+
+/* Best settings per step: [target, settings, result]. Steps: the step's ask block in labN.html, or measured on the live page.
+   Tournaments: grid search with each lab's run() from functions/_generated/labs.js on the practice seeds and the official (hidden) seeds. */
+const BEST = {
+  "1:scenario": { rows: [
+    ["Cost of cooling", "Level 5 at 35 °C outside", "0.59 MW · 106 SAR/h night, 282 peak · 4,062 SAR all day"],
+    ["Day 101, finished agent", "Defaults, ▶ Play", "3,905 SAR vs 4,150 budget: 245 under"],
+    ["Mission", "4 PEAS guesses → Reveal → ▶ Play → hover 15:00–18:00 and 13:00–17:00", "Example buttons do not count"],
+  ]},
+  "1:beat": { note: "Day 131, budget 3,480 SAR (best possible 3,157). 12 blocks of 2 h.", rows: [
+    ["Lowest flat plan, 0 min", "5 in every block", "3,815 SAR, 335 over (flat 4: 510 min above)"],
+    ["Within budget", "3,3,3,6,4,6,4,5,5,4,4,3", "3,363 SAR, 117 under"],
+    ["≥ 200 under (greedy)", "3,4,4,4,4,4,4,5,5,5,4,3", "3,228 SAR, 252 under"],
+    ["Best possible 12-block plan", "1,2,2,6,4,5,4,5,5,5,4,3", "3,212 SAR, 268 under"],
+  ]},
+  "1:reflex": { note: "T_set / HIGH / LOW. Day 101, budget 4,150 SAR.", rows: [
+    ["0 min on day 101", "22 / 10 / 2", "0 min (296 settings work)"],
+    ["0 min and within budget", "22.5 / 10 / 2", "4,080 SAR, 70 under (best)"],
+    ["10-day loss < 2,000", "22 / 10 / 1", "−1,337 SAR (best); 22/10/2: −1,475"],
+    ["Heat wave breaks a safe rule", "22.5 / 10 / 2, heat +2 °C", "10 min above (+4 °C: 100 min)"],
+  ]},
+  "1:model": { note: "target / K / horizon. Day 101.", rows: [
+    ["0 min on day 101", "23 / 1.5 / 5", "3,979 SAR (also 22 / 4 / 4)"],
+    ["10-day loss < 1,500", "22.5 / 4 / 4", "−628 SAR (best); 22/4/4: −1,114"],
+    ["≥ 40 direction changes", "24 / 1.5 / 8", "52 (horizon 7: 46; K 1.4, horizon 6: 42)"],
+  ]},
+  "1:goal": { note: "target / lookahead / K. Day 101, budget 4,150 SAR.", rows: [
+    ["0 min, lookahead ≤ 3", "22 / 3 / 1.5", "4,059 SAR, 91 under"],
+    ["≥ 280 under", "25.5 / 7 / 1", "3,848 SAR, 302 under (best); 26/8/0.5: 285 under"],
+    ["All 10 days within, ≥ 1,800 left", "26 / 8 / 0.5", "1,985 SAR (best); 25.5/7/1: 1,926"],
+  ]},
+  "1:utility": { note: "Day 101, budget 4,150 SAR. Defaults (w_viol 1, H 6): 245 under, 1,348 left over 10 days.", rows: [
+    ["≥ 270 under, 0 min", "w_viol 1.2, H 5", "3,872 SAR, 278 under (best)"],
+    ["≥ 1,450 left over 10 days", "w_viol 0.5, H 6", "1,568 SAR (best); 0.6 / 6: 1,514"],
+    ["0 min in a +5 °C heat wave", "w_viol 1, H 7 (or 8)", "0 min (H 6: 10 min)"],
+  ]},
+  "1:learning": { rows: [
+    ["Fewest days → true constants", "4 logged days", "learned = true from 4 days on"],
+    ["0 min with ≤ 3 days", "3 days", "3,874 SAR, 276 under"],
+    ["≥ 1,600 left over 10 days", "3 days, w_viol 1", "1,680 SAR (w_viol 0.5: 1,880)"],
+  ]},
+  "1:measure": { note: "10 practice days.", rows: [
+    ["Never violate: w_viol 1 leaves the tie", "Heat wave +5 °C", "1 min above 27 °C per day"],
+    ["Bill: w_viol 3 cheaper than w_viol 1", "Heat wave +6 °C", "5,250 vs 5,609 SAR/day (+5: 4,990 vs 5,028, not yet)"],
+  ]},
+  "1:tournament": { note: "SAR left. Practice = days 101–110, last two +5 °C. Grid search (w_wear 0). Utility w_viol 0.5, H 6 (1,568 in step 7, no heat) gives −39,667 here.", rows: [
+    ["Defaults", "Utility, w_viol 1, H 6", "practice 1,480 · official (hidden days) −55,701"],
+    ["Best on practice", "Goal, target 26, K 0.6, lookahead 8", "practice 2,218 · official (hidden days) −12,711"],
+    ["Best official", "Learning, w_viol 0.9, H 11, 3 days", "practice −42,832 · official (hidden days) 1,489"],
+    ["Robust (best on both)", "Learning, w_viol 1, H 11, 3 days", "practice 1,077 · official (hidden days) 1,452"],
+    ["Alternative", "Goal, target 25, K 0.6, lookahead 12", "practice 843 · official (hidden days) 1,251"],
+    ["Alternative", "Utility, w_viol 1, H 11", "practice 305 · official (hidden days) 871"],
+  ]},
+  "2:formulation": { rows: [
+    ["Corner map (opening)", "expand() on every cell", "17 nodes, 17 edges"],
+    ["Graph is a tree", "Maze", "305 states, 304 edges (campus 458/777, warehouse 322/337, hall 554/1,033, office 477/803)"],
+    ["Goal no path reaches", "Office, goal Server room", "no solution from any start"],
+    ["Gate closed", "Library → Cafeteria", "369 cells reachable; 84 inside the courtyard"],
+  ]},
+  "2:report": { note: "The race: moves / expanded / max frontier.", rows: [
+    ["Campus Library → Cafeteria", "BFS · DFS · DLS ℓ 30 · IDS", "28/283/17 · 98/341/131 · 30 moves after 1,744 · 28/18,873/52"],
+    ["Maze Entrance → Exit (108 moves)", "BFS · DFS · DLS ℓ 30 · IDS", "156 · 109 · cut off after 31 · 7,615 expansions"],
+    ["Open hall Entrance → Stage (33 moves)", "BFS · DFS · DLS ℓ 30 · IDS", "465 · 34 · cut off · 35,816 expansions"],
+  ]},
+  "2:frontier": { rows: [
+    ["Open room (opening)", "BFS · DFS", "18 taken out, queue ≤ 4 · 16 taken out, stack 9; both 7 moves"],
+    ["Campus Library → Cafeteria", "BFS", "queue ≤ 17"],
+    ["Open hall, from the Bar", "BFS", "queue peaks at 35"],
+    ["Office, goal Server room", "BFS or DFS, Play", "frontier empty after 435 expansions"],
+  ]},
+  "2:bfs": { rows: [
+    ["Room with a wall (opening)", "BFS", "24 taken out, 29 reached, G at depth 8, queue ≤ 8"],
+    ["Campus", "Library → Cafeteria · Depot → Sports hall", "28 moves, 283 · 46 moves, 442"],
+    ["Maze", "Entrance → Treasure · Entrance → Exit", "144 moves · 108 moves"],
+    ["Open hall / warehouse", "Bar → Kitchen · Dock → Returns", "552 expansions · 41 moves, 297"],
+    ["Gate closed", "Library → Cafeteria", "no path after 369 expansions"],
+  ]},
+  "2:dfs": { rows: [
+    ["Long way round (opening)", "DFS vs BFS", "14 moves after 19 expansions vs 4 moves; IDS finds 4 at ℓ = 4"],
+    ["Campus Library → Cafeteria", "Graph DFS, Right popped first", "98 moves, 341 expansions, stack peak 131 (117 left)"],
+    ["Reached only when popped", "Variant DFS", "108 moves, 402 expansions"],
+    ["Maze", "Entrance → Exit · Entrance → Back door", "DFS 109 vs BFS 156 · DFS 269 vs BFS 52"],
+    ["Warehouse Dock → Office", "Depth-limited ℓ 48 · 49", "nothing · 49 moves"],
+    ["Gate closed", "IDS up to ℓ 80", "stops at ℓ 42 without cut-off: no path (59,249)"],
+  ]},
+  "2:code": { note: "Expected results of the Python tabs (solutions below).", rows: [
+    ["1 expand() + 2 BFS", "Campus Library → Cafeteria", "28 moves, 283 expansions; gate closed: None after 369"],
+    ["3 DFS", "frontier.pop()", "98 moves, 325 expansions (340 if the goal is tested when popped; both pass), max frontier 131; gate closed: None after 369"],
+    ["4 Depth-limited", "Corner map, ℓ = 7 · ℓ = 8", "'cutoff' after 17 expansions · path after 22"],
+    ["4 Iterative deepening", "Corner map · walled-in G", "8 moves after 78 expansions (BFS 16) · DLS ℓ 8: None after 24, IDS: None after 111"],
+  ]},
+  "2:byhand": { note: "Mini-map. 9/9 = every click right, 3 answers right, no wrong click.", rows: [
+    ["BFS round (10 steps, 21 clicks)", "S+E A, E+H, A+B, H+J, B+C, J+K, C+D, K+L, D+F, L+G", "S E H J K L G, 6 moves"],
+    ["DFS round (14 steps, 28 clicks)", "S+E A, A+B, B+C, C+D, D+F, F+I, I+N, N+M, M+L, L+G K, K+J, J+H, H, G out", "S A B C D F I N M L G, 10 moves"],
+    ["3 questions", "Shorter path: BFS · more cells taken out: DFS (14 vs 10) · E stays: DFS takes the cell added last", "3 points"],
+  ]},
+  "2:applied": { rows: [
+    ["Knight target exactly 5 moves", "From a1: a8 c8 e8 g8 f7 h7 g6 h5 h3 h1", "5 moves (a1 → h8: 6)"],
+    ["Ladder ≥ 10 changes", "CALL → LOST", "13 changes"],
+    ["DFS counts one more object", "Draw an island touching no other", "5 → 6 (roof: 15 → 16)"],
+  ]},
+  "2:treesearch": { rows: [
+    ["Campus Depot → Library, BFS", "graph · path check · no checks", "14 · 22 · 206 expansions, same 7 moves"],
+    ["Warehouse Returns → Dock", "BFS path check vs graph", "533 vs 79 (6.7×)"],
+    ["Open hall Entrance → Cloakroom", "BFS, no checks", "8 moves, 17,577 expansions"],
+    ["Maze Entrance → Exit", "DFS with path check", "109 = 109"],
+    ["Gate closed", "graph BFS vs tree BFS", "no path after 369 vs stops at the 30,000 limit"],
+  ]},
+  "2:blowup": { rows: [
+    ["Guess, then show", "b = 10, 16 GB", "BFS no longer fits at depth 8 (≈111 GB)"],
+    ["No red time cell", "b = 4 at 1M nodes/s", "all time < 1 day; BFS memory red from depth 12 (b 5: time red)"],
+    ["IDS = 1.5× BFS at depth 16", "b = 3", "1.50 (b 2: 2.00, b 4: 1.33)"],
+  ]},
+  "2:puzzle": { rows: [
+    ["Medium (16 moves)", "BFS · IDS · bidirectional", "~6,600 expansions, 10,600 kept · 17 kept, ~48,000 expansions · ~300"],
+    ["Hard (24 moves)", "BFS · IDS · bidirectional", "~130,000 kept · gives up · ~2,200 expansions"],
+    ["Medium, depth-limited", "ℓ = 15 · ℓ = 16", "fails · solves"],
+    ["Unsolvable", "BFS · bidirectional", "all 181,440 boards · no solution after 297,528"],
+    ["Python exercise", "bfs(BOARD, GOAL, successors)", "6 moves, 34 expansions; 12-move board: 1,157"],
+  ]},
+  "2:tournament": { note: "SAR profit on the three warehouses (seeds 36, 56, 12; per warehouse in brackets). Official = the same three, so official = practice.", rows: [
+    ["Defaults", "BFS, chip", "−163 (20 of 34 out of memory)"],
+    ["Best", "Iterative deepening ℓ = 40, chip", "819 (320, 260, 240)"],
+    ["Other ℓ, chip", "IDS ℓ 45 · 50 · 60–80 · 35 · 30", "814 · 808 · 803 · 775 · 584"],
+    ["Alternative", "BFS, cloud", "801 (295, 261, 246): proves both sealed aisles"],
+    ["Alternative", "Bidirectional BFS, edge server", "790 (285, 260, 245): 76 extra moves"],
+    ["Weaker", "DLS ℓ 40 chip · BFS edge · bidirectional chip · DFS cloud · DFS chip", "747 · 685 · 281 · 272 · −281"],
+  ]},
+  "3:measurement": { note: "Measured on the page.", rows: [
+    ["Biased, precise", "Bias 1.0, noise 0.2, 1 reading", "sd 0.19, bias 1.02, MSE 1.075 → calibrate"],
+    ["Unbiased, noisy", "Bias 0, noise 1.0, 1 reading", "sd 0.96, bias 0.09, MSE 0.939 → average"],
+    ["Averaging fixes noise", "Bias 0, noise 1.0, 16 readings", "sd 0.25, MSE 0.064"],
+  ]},
+  "3:outliers": { note: "sleep_hours. Measured on the page.", rows: [
+    ["20 errors, no rule", "Inject 20", "mean 6.50 → 8.08, median 6.50, 7 errors in sleep"],
+    ["|z| > 2 or |z| > 3", "20 errors", "7 flagged, 0 real students, 0 missed"],
+    ["IQR × 1.5", "20 errors", "8 flagged, 1 real student, 0 missed"],
+    ["No errors: false flags", "|z| > 2 · |z| > 3 · IQR", "real students flagged: 14 · 1 · 4"],
+  ]},
+  "3:missing": { rows: [
+    ["Mean imputation, at random", "30% missing", "corr(study, gpa) 0.76 → 0.65 (60%: 0.53)"],
+    ["Not at random, 30% (true 6.50 h)", "eliminate · mean · median · ignore", "6.64 · 6.70 · 6.68 · 6.70: none recovers"],
+  ]},
+  "3:duplicates": { rows: [
+    ["Count CS students", "Typos 40%, 30 duplicates", "naive 36 → standardized 65 → deduplicated 64 (true 64)"],
+    ["Copies that disagree", "Same id, 28 duplicated ids", "15 differ on commute_min"],
+  ]},
+  "3:sampling": { rows: [
+    ["Smallest major ≥ 3 (draws 1–20)", "Random n = 40 · stratified n = 15", "always ≥ 3 students"],
+    ["Error curve", "n = 25 → 100", "0.125 → 0.054 h: 4× data ≈ ½ error"],
+  ]},
+  "3:transform": { rows: [
+    ["Log commute_min", "log", "skewness 1.7 → 0.02"],
+    ["Sleep in 4 bins", "equal width · equal frequency", "70/136/83/11 · 74/72/72/82"],
+  ]},
+  "3:dimensions": { rows: [
+    ["PCA, centered and scaled", "Rotate to the peak", "PC1 at 45°, 88.2%"],
+    ["Centring off", "Untick centring", "PC1 swings to 67° (points at the mean)"],
+    ["Normalization off", "Untick normalize", "PC1 at 3°, 99.8%: study_hours sd 5.99 vs gpa 0.41"],
+  ]},
+  "3:tournament": { note: "Points (1000 max). Practice surveys 21–23; official (hidden days) = 5 hidden surveys. Full grid search.", rows: [
+    ["Defaults", "Labels as is, keep duplicates, no outlier rule, ignore", "practice 588 · official (hidden days) 590"],
+    ["Best on practice and official", "Standardize labels, remove duplicates, |z| > 3 (or > 2) → set to missing, ignore", "practice 880 · official (hidden days) 885"],
+    ["Alternative", "Same, outliers → median", "practice 874 · official (hidden days) 883"],
+    ["Alternative", "Same, IQR × 1.5 → set to missing", "practice 862 · official (hidden days) 872"],
+    ["Alternative", "Same, |z| > 3 → missing, missing → mean", "practice 855 · official (hidden days) 860"],
+    ["Trap", "Same, missing → drop the row", "practice 674 · official (hidden days) 667"],
+  ]},
+  "4:minkowski": { note: "Measured on the page.", rows: [
+    ["y = (7, 8)", "r = 1 · 2 · ∞", "8 · 5.66 · 4"],
+    ["Ranking flips with r", "y = (9, 5)", "r = 1: p2 7, p4 8 · r = ∞: p2 6, p4 5"],
+    ["Tie for nearest", "y = (7, 4), r = ∞", "p2 and p3 both at 4"],
+  ]},
+  "4:metric": { rows: [
+    ["Squared Euclidean breaks the triangle", "y at the midpoint (5, 5)", "d(x, z) = 52 > 13 + 13"],
+    ["1 − cosine not a metric", "x = (2, 3), y = (4, 6)", "distance 0 for different points"],
+  ]},
+  "4:scaling": { note: "Share of trips whose nearest trip has the same root cause (guessing: 20%).", rows: [
+    ["Raw sensors", "Weights all 1", "32%"],
+    ["Standardized", "Weights all 1", "52%"],
+    ["Best weights (lab)", "Vibration, bearing temp, flow 1.5; pressure 0.5", "58% (flow 0.3, vib + temp 2: 42%)"],
+  ]},
+  "4:binary": { rows: [
+    ["Trip 1 vs Trip 2", "12 alarm codes", "f11 1, f10 0, f01 1, f00 10 → SMC 0.917, Jaccard 0.5"],
+    ["Lecture example", "x, y from the slide", "SMC 0.7, Jaccard 0"],
+    ["Silent tags", "+200 tags that never fired", "avg SMC 0.70 → ~0.98; Jaccard unchanged"],
+  ]},
+  "4:cosine": { note: "Sample note, measured on the page.", rows: [
+    ["Stop words removed", "cosine", "#1 Cavitation 0.536 · #2 Impeller blockage 0.178"],
+    ["Stop words kept", "cosine", "Cavitation 0.63 · Impeller 0.463 · Seal 0.386: filler lifts all"],
+    ["Note 3× longer", "cosine vs Euclidean", "cosine unchanged; Euclidean punishes length"],
+  ]},
+  "4:correlation": { note: "Measured on the page.", rows: [
+    ["Same shape, other level", "Offset 5, gain 2, noise 0", "corr 1 · Euclidean 32.1 · cosine 0.988"],
+    ["Wrong-sign sensor", "Offset 5, gain −1, noise 0", "corr −1 · Euclidean 17.2 · cosine 0.013"],
+  ]},
+  "4:mahalanobis": { note: "Measured on the page.", rows: [
+    ["Along the pump curve", "Flow 300 → 560 m³/h", "Euclid (std) 1.21 → 2.74 · Mahalanobis 0.88 → 2.00, no alarm"],
+    ["Off the curve", "380 m³/h, 5 bar below", "Mahalanobis 0.02 → 4.29, alarm · Euclid 0.01 → 1.17"],
+  ]},
+  "4:tournament": { note: "Points = 1000 × share correct. Practice rounds 41–43; official (hidden days) = 5 hidden rounds. Grid: weights 0, 0.5, 1, 1.5, 2, 3.", rows: [
+    ["Defaults", "Euclidean, raw, SMC, cosine, stop words kept, weights 1/1/1", "practice 533 · official (hidden days) 567"],
+    ["Best on practice", "Euclidean, z-scores, Jaccard, ext. Jaccard, remove stop words, weights 1/0.5/0.5", "practice 811 · official (hidden days) 740"],
+    ["Best official", "Manhattan, z-scores, Jaccard, cosine, remove stop words, weights 1.5/2/1", "practice 689 · official (hidden days) 793"],
+    ["Robust", "Euclidean, z-scores, Jaccard, cosine, remove stop words, weights 1.5/1/1", "practice 778 · official (hidden days) 760"],
+    ["Alternative", "Euclidean, z-scores, Jaccard, ext. Jaccard, remove stop words, weights 3/2/1.5", "practice 800 · official (hidden days) 753"],
+    ["The three lessons only", "Defaults + z-scores + Jaccard + remove stop words", "practice 767 · official (hidden days) 747"],
+  ]},
+};
+
+/* Python solutions (lab 2): code lives in the <script type="text/plain" id="sol-…"> blocks above */
+const SOL = {
+  expand: { title: "1 · expand(): neighbors(grid, cell)", expect: "With BFS: Campus Library → Cafeteria 28 moves, 283 expansions; gate closed: None after 369." },
+  bfs: { title: "2 · BFS", expect: "Library → Cafeteria 28 moves, 283 expansions; gate closed: None after 369." },
+  dfs: { title: "3 · DFS (starts from the student's own BFS, pasted in)", expect: "frontier.pop(): 98 moves, 325 expansions (340 if the goal is tested when popped; both pass), max frontier 131; gate closed: None after 369." },
+  dls: { title: "4 · Depth-limited + iterative deepening (stretch)", expect: "Corner map: ℓ = 7 'cutoff' after 17 expansions, ℓ = 8 path after 22; IDS 8 moves after 78 (BFS 16). Walled-in G: None at ℓ = 8 after 24; IDS None after 111." },
+  puzzle: { title: "8-puzzle: successors() + BFS (starts from the student's own BFS, pasted in)", expect: "6 moves, 34 expansions; the 12-move board: 1,157 expansions." },
+  flood: { title: "Paint bucket / oil slick (BFS)", expect: "Fills ring by ring; the oil slick is 137 pixels = 0.34 km²." },
+  knight: { title: "Knight moves (BFS)", expect: "a1 → h8: 6 moves." },
+  ladder: { title: "Word ladder (BFS)", expect: "COLD → CORD → CARD → WARD → WARM; no ladder to QUIZ." },
+  objects: { title: "Count objects (DFS)", expect: "5 islands; 15 objects on the roof (18 panels, three touching pairs)." },
+  folders: { title: "Folder sizes (DFS)", expect: "Totals bottom-up; Home is 8.1 GB." },
+  build: { title: "Build order (DFS with cycle detection)", expect: "Post-order is a valid build order; an edge to a task still in progress is a cycle." },
+};
+Object.entries(SOL).forEach(([k, v]) => { v.code = document.getElementById("sol-" + k).textContent.replace(/^\n/, "").replace(/\s+$/, ""); });
+const SOL_STEPS = { "2:code": ["expand", "bfs", "dfs", "dls"], "2:puzzle": ["puzzle"], "2:applied": ["flood", "knight", "ladder", "objects", "folders", "build"] };
+
+/* ---------- rendering ---------- */
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const clock = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
+const COLORS = ["--t1", "--t2", "--t3", "--t4"];
+let current = 1, query = "";
+
+// cumulative clock per step
+LABS.forEach((L) => { let t = 0; L.steps.forEach((s, i) => { s.no = i + 1; s.from = t; t += s.m; s.to = t; s.best = BEST[L.n + ":" + s.id]; s.sol = SOL_STEPS[L.n + ":" + s.id]; }); L.total = t; });
+
+function hl(text, terms) {
+  let out = esc(text);
+  if (!terms.length) return out;
+  const re = new RegExp("(" + terms.map((t) => esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+  return out.replace(re, "<mark>$1</mark>");
+}
+const norm = (s) => s.toLowerCase();
+const matches = (hay, terms) => { const h = norm(hay); return terms.every((t) => h.includes(t)); };
+const stepLink = (L, s) => `${SITE}lab${L.n}.html#${s.id}`;
+const stepLabel = (s) => (s.id === "tournament" ? "tournament" : `step ${s.no}`);
+
+function renderTabs() {
+  $("#tabs").innerHTML = LABS.map((L) => `<button class="tab" role="tab" data-lab="${L.n}" aria-selected="${!query && L.n === current}"><b>Lab ${L.n}</b><span>${esc(L.short)}</span></button>`).join("");
+}
+
+function card(L, s, c, terms, showLab) {
+  const [name, x, ex, url] = c;
+  return `<article class="card${url ? " ta" : ""}" style="--c:var(${COLORS[L.n - 1]})">
+    ${showLab ? `<span class="labtag">Lab ${L.n} · ${esc(L.short)}</span>` : ""}
+    <h3>${hl(name, terms)}</h3>
+    <p class="x">${hl(x, terms)}</p>
+    <p class="ex">${hl(ex, terms)}</p>
+    ${url ? `<div class="in"><a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(SITE, ""))} ↗</a></div>` : ""}
+    <div class="in">In the lab: <a href="${stepLink(L, s)}" target="_blank" rel="noopener">${stepLabel(s)} ↗</a></div>
+  </article>`;
+}
+
+function answerKey(k, terms = []) {
+  const head = `<tr><th>${esc(k.head || "Agent")}</th>${k.cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>`;
+  const rows = k.rows.map(([agent, cells]) => `<tr><td class="agent">${hl(agent, terms)}</td>${cells.map(([a, why]) => `<td><b>${hl(a, terms)}</b><span>${hl(why, terms)}</span></td>`).join("")}</tr>`).join("");
+  return `<div class="key"><h3>${esc(k.title)}</h3><table>${head}${rows}</table></div>`;
+}
+
+function bestBox(b, rows, terms = []) {
+  const body = rows.map(([goal, set, res]) => `<tr><td class="agent">${hl(goal, terms)}</td><td>${hl(set, terms)}</td><td><b>${hl(res, terms)}</b></td></tr>`).join("");
+  return `<div class="key best"><h3>Best settings${b.note ? ` <span>${hl(b.note, terms)}</span>` : ""}</h3><table><tr><th>Target</th><th>Settings</th><th>Result</th></tr>${body}</table></div>`;
+}
+
+const solText = (k) => SOL[k].title + " " + SOL[k].expect + " " + SOL[k].code;
+function solBlock(kinds, terms = []) {
+  const items = kinds.map((k) => `<details open><summary><b>${hl(SOL[k].title, terms)}</b><span>${hl(SOL[k].expect, terms)}</span></summary>
+    <div class="code"><button type="button" class="copy" data-copy="${k}">Copy</button><pre><code>${hl(SOL[k].code, terms)}</code></pre></div></details>`).join("");
+  return `<div class="key sol"><h3>Python solutions <span>TA only: students no longer see them.</span></h3>${items}</div>`;
+}
+
+function stepBlock(L, s, cards, terms = [], withKey = true, bestRows = s.best ? s.best.rows : [], sols = s.sol || []) {
+  return `<section class="step" id="l${L.n}-${s.id}" style="--c:var(${s.id === "tournament" ? "--tour" : COLORS[L.n - 1]})">
+    <h2><span class="num">${s.id === "tournament" ? "★" : s.no}</span>${esc(s.t)}<span class="clk">${clock(s.from)}–${clock(s.to)} · ${s.m} min</span><a href="${stepLink(L, s)}" target="_blank" rel="noopener">open ${stepLabel(s)} ↗</a></h2>
+    ${bestRows.length ? bestBox(s.best, bestRows, terms) : ""}
+    ${s.key && withKey ? answerKey(s.key, terms) : ""}
+    ${sols.length ? solBlock(sols, terms) : ""}
+    <div class="cards">${cards}</div>
+  </section>`;
+}
+
+function renderLab(L) {
+  const col = COLORS[L.n - 1];
+  const timeline = L.steps.map((s) => `<button class="seg${s.id === "tournament" ? " tour" : ""}" style="--m:${s.m};--c:var(${col})" data-jump="l${L.n}-${s.id}" title="${esc(s.no + ". " + s.t + " · " + clock(s.from) + "–" + clock(s.to) + " · " + s.m + " min")}">
+      <span class="n">${s.id === "tournament" ? "★" : s.no}</span> <span class="clk">${clock(s.from)}–${clock(s.to)}</span><span class="tt">${esc(s.t)}</span></button>`).join("");
+  const formulas = L.formulas.map(([k, f]) => `<span class="fx"><b>${esc(k)}</b><span class="f">${esc(f)}</span></span>`).join("");
+  const steps = L.steps.map((s) => stepBlock(L, s, s.c.map((c) => card(L, s, c, [], false)).join(""))).join("");
+  const faq = L.faq.map(([q, a]) => `<div class="qa"><div class="q">${esc(q)}</div><div class="a">${esc(a)}</div></div>`).join("");
+  return `<div class="labhead"><h1>Lab ${L.n} · ${esc(L.title)}</h1><span class="meta">${esc(L.when)} · ${L.total} min · ${L.steps.length} steps</span><a href="${SITE}lab${L.n}.html" target="_blank" rel="noopener">open lab ↗</a></div>
+    <p class="scenario">${esc(L.scenario)}</p>
+    <nav class="timeline" aria-label="Timeline">${timeline}</nav>
+    <div class="formulas">${formulas}</div>
+    <div class="cols"><div>${steps}</div><aside class="faq"><h2>Students often ask</h2>${faq}</aside></div>`;
+}
+
+function renderSearch(terms) {
+  let total = 0;
+  const parts = LABS.map((L) => {
+    const steps = L.steps.map((s) => {
+      const hits = s.c.filter((c) => matches(c.join(" ") + " " + s.t, terms));
+      const keyHit = !!s.key && matches(s.key.title + " " + s.key.rows.flat(3).join(" "), terms);
+      const bestHits = s.best ? s.best.rows.filter((r) => matches(r.join(" ") + " " + (s.best.note || "") + " best settings", terms)) : [];
+      const solHits = (s.sol || []).filter((k) => matches(solText(k) + " python solutions", terms));
+      total += hits.length + (keyHit ? 1 : 0) + bestHits.length + solHits.length;
+      return hits.length || keyHit || bestHits.length || solHits.length ? stepBlock(L, s, hits.map((c) => card(L, s, c, terms, true)).join(""), terms, keyHit, bestHits, solHits) : "";
+    }).join("");
+    const faqs = L.faq.filter((qa) => matches(qa.join(" "), terms));
+    total += faqs.length;
+    if (!steps && !faqs.length) return "";
+    const faq = faqs.length ? `<aside class="faq"><h2>Students often ask · Lab ${L.n}</h2>${faqs.map(([q, a]) => `<div class="qa"><div class="q">${hl(q, terms)}</div><div class="a">${hl(a, terms)}</div></div>`).join("")}</aside>` : "<div></div>";
+    return `<section class="labsec"><div class="labhead"><h1 style="font-size:1.25rem">Lab ${L.n} · ${esc(L.title)}</h1></div><div class="cols"><div>${steps}</div>${faq}</div></section>`;
+  }).join("");
+  return `<p class="results-head">${total} match${total === 1 ? "" : "es"} for “${esc(query)}” in all labs · Esc to clear</p>` + (parts || `<p class="empty">Nothing found.</p>`);
+}
+
+function render() {
+  renderTabs();
+  const terms = norm(query).split(/\s+/).filter(Boolean);
+  $("#main").innerHTML = terms.length ? renderSearch(terms) : renderLab(LABS[current - 1]);
+  measure(); spy();
+}
+
+// sticky offsets: header height, and header + timeline for the FAQ panel and scroll targets
+function measure() {
+  const hh = $("header").offsetHeight, tl = $(".timeline");
+  document.documentElement.style.setProperty("--hh", hh + "px");
+  document.documentElement.style.setProperty("--stick", hh + (tl ? tl.offsetHeight : 0) + "px");
+}
+
+// mark the timeline segment of the step currently at the top of the screen
+function spy() {
+  const segs = document.querySelectorAll(".seg");
+  if (!segs.length) return;
+  const line = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--stick")) + 40;
+  let on = segs[0].dataset.jump;
+  segs.forEach((s) => { const el = document.getElementById(s.dataset.jump); if (el && el.getBoundingClientRect().top <= line) on = s.dataset.jump; });
+  segs.forEach((s) => s.classList.toggle("on", s.dataset.jump === on));
+}
+addEventListener("scroll", spy, { passive: true });
+addEventListener("resize", () => { measure(); spy(); });
+
+function setLab(n, push = true) {
+  current = n; query = ""; $("#q").value = "";
+  if (push) history.replaceState(null, "", "#lab" + n);
+  render(); window.scrollTo({ top: 0 });
+}
+
+function jump(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1200);
+}
+
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest("[data-lab]"); if (tab) return setLab(+tab.dataset.lab);
+  const seg = e.target.closest("[data-jump]"); if (seg) return jump(seg.dataset.jump);
+  const cp = e.target.closest("[data-copy]");
+  if (cp) {
+    const done = (msg) => { cp.textContent = msg; setTimeout(() => (cp.textContent = "Copy"), 1200); };
+    if (navigator.clipboard) navigator.clipboard.writeText(SOL[cp.dataset.copy].code).then(() => done("Copied"), () => done("Select and copy"));
+    else done("Select and copy");
+  }
+});
+$("#q").addEventListener("input", (e) => { query = e.target.value.trim(); render(); window.scrollTo({ top: 0 }); });
+document.addEventListener("keydown", (e) => {
+  const inInput = e.target.matches("input, textarea");
+  if (e.key === "Escape" && (query || inInput)) { query = ""; $("#q").value = ""; $("#q").blur(); render(); return; }
+  if (inInput || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
+  else if (/^[1-4]$/.test(e.key)) setLab(+e.key);
+});
+
+const isDark = () => { const a = document.documentElement.getAttribute("data-theme"); return a ? a === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+$("#theme").addEventListener("click", () => {
+  const t = isDark() ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem("cs220p-cheat-theme", t); } catch (e) {}
+});
+
+const labFromHash = () => { const m = /^#lab([1-4])$/.exec(location.hash); return m ? +m[1] : 0; };
+addEventListener("hashchange", () => { const n = labFromHash(); if (n && (n !== current || query)) setLab(n, false); });
+setLab(labFromHash() || 1, false);
+</script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS220P class results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css">
+<style>
+body{max-width:1200px;margin:0 auto;padding:1.5rem clamp(1rem,3vw,2.5rem) 4rem}
+.top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem 1rem}
+.live{font-size:.85rem;color:var(--muted)} .live b{color:var(--mint-2)}
+.big{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}
+.big .metric .v{font-size:2.2rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+@media (max-width:860px){.grid2{grid-template-columns:1fr}}
+.q{margin:1rem 0 .3rem;font-weight:600}
+.empty{color:var(--muted);font-style:italic}
+.admin{margin-top:2.5rem} .admin summary{cursor:pointer;color:var(--muted)}
+button.del{padding:.15em .6em;font-size:.8rem}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><div class="brand" style="color:var(--muted);font-weight:600"><a href="index.html" style="color:inherit;text-decoration:none">CS220P Data Analytics</a></div><h1 id="title">Class results</h1></div>
+  <div class="live" id="live">connecting…</div>
+</div>
+<div class="big" id="big"></div>
+<div class="grid2">
+  <div><h2>Score distribution</h2><div id="hist"></div><h2>How the class answered</h2><div id="answers"></div></div>
+  <div><h2>Submissions</h2><div class="wide" id="rows"></div></div>
+</div>
+<details class="admin"><summary>Admin (TA)</summary>
+  <p class="note">The admin token from the leaderboard page works here too. Delete a submission to let a student submit again, or reset the whole activity.</p>
+  <div class="btns"><input type="password" id="token" placeholder="admin token" style="min-width:16rem"><button id="check">Unlock</button><button class="danger" id="reset" disabled>Reset this activity</button></div>
+  <p class="note" id="adminMsg"></p>
+</details>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmt = (x, d = 0) => (Math.round(x * 10 ** d) / 10 ** d).toLocaleString("en-US", { maximumFractionDigits: d });
+  const [lab, exercise] = (location.hash.slice(1) || "L2/byhand").split("/");
+  let admin = localStorage.getItem("cs220p:admin") || "", unlocked = false;
+  $("title").textContent = `Class results · ${lab} · ${exercise}`;
+  const bars = (counts, total) => `<div class="barchart">${counts.map(([label, n]) => `<div class="bar-row"><span class="bl">${esc(label)}</span><span class="track"><i class="pos" style="left:0;width:${total ? (100 * n) / total : 0}%"></i></span><span class="bv">${n}</span></div>`).join("")}</div>`;
+  function render(rows) {
+    const n = rows.length, pct = rows.map((r) => (100 * r.score) / r.max), avg = n ? pct.reduce((a, b) => a + b, 0) / n : 0;
+    const took = (s) => (typeof s !== "number" ? "–" : s >= 60 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`);
+    const secs = rows.map((r) => r.answers && r.answers._seconds).filter((s) => typeof s === "number"), avgS = secs.length ? Math.round(secs.reduce((a, b) => a + b, 0) / secs.length) : null;
+    $("big").innerHTML = `<div class="metric"><div class="k">Submitted</div><div class="v">${n}</div></div><div class="metric"><div class="k">Average score</div><div class="v">${n ? fmt(avg) + "%" : "–"}</div></div><div class="metric"><div class="k">Full marks</div><div class="v">${rows.filter((r) => r.score >= r.max).length}</div></div>` + (avgS != null ? `<div class="metric"><div class="k">Average time taken</div><div class="v">${took(avgS)}</div></div>` : "");
+    const bins = ["0–20%", "20–40%", "40–60%", "60–80%", "80–99%", "100%"].map((l) => [l, 0]);
+    pct.forEach((p) => bins[p >= 100 ? 5 : Math.min(4, Math.floor(p / 20))][1]++);
+    $("hist").innerHTML = n ? bars(bins, n) : `<p class="empty">No submissions yet.</p>`;
+    /* answers: every key whose value is a string, number or boolean is tallied */
+    const tally = {};
+    rows.forEach((r) => Object.entries(r.answers || {}).forEach(([k, v]) => { if (!k.startsWith("_") && ["string", "number", "boolean"].includes(typeof v)) { (tally[k] ??= {}); tally[k][String(v)] = (tally[k][String(v)] || 0) + 1; } }));   // _seconds/_started are metadata
+    $("answers").innerHTML = Object.keys(tally).length ? Object.entries(tally).map(([k, c]) => `<div class="q">${esc(k)}</div>${bars(Object.entries(c).sort((a, b) => b[1] - a[1]), n)}`).join("") : `<p class="empty">Answers appear here as they arrive.</p>`;
+    $("rows").innerHTML = n ? `<table class="leader"><tr><th>Name</th><th>Team</th><th>Score</th><th>Time taken</th><th>Submitted at</th>${unlocked ? "<th></th>" : ""}</tr>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td class="pts">${fmt(r.score, 1)} / ${fmt(r.max, 1)}</td><td>${took(r.answers && r.answers._seconds)}</td><td class="note">${new Date(r.created_at).toLocaleTimeString()}</td>${unlocked ? `<td><button class="ghost del" data-id="${r.id}">delete</button></td>` : ""}</tr>`).join("")}</table>` : `<p class="empty">Nobody has submitted yet.</p>`;
+    $("live").innerHTML = `<b>●</b> live · updated ${new Date().toLocaleTimeString()}`;
+  }
+  async function load() {
+    try {
+      const r = await fetch(`/api/answers?lab=${encodeURIComponent(lab)}&exercise=${encodeURIComponent(exercise)}`, { cache: "no-store", headers: admin ? { authorization: "Bearer " + admin } : {} });
+      const d = await r.json();
+      if (r.status === 401 && d.private) { $("live").textContent = "private activity: open Admin (TA) at the bottom and unlock"; $("big").innerHTML = ""; $("hist").innerHTML = ""; $("answers").innerHTML = ""; $("rows").innerHTML = `<p class="empty">Private: unlock Admin (TA) below with the admin token.</p>`; document.querySelector(".admin").open = true; return; }
+      if (!r.ok) throw new Error(d.error); render(d.rows);
+    }
+    catch (e) { $("live").textContent = "offline: retrying…"; }
+  }
+  async function adminCall(body) {
+    const r = await fetch("/api/admin", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + admin }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.status); return d;
+  }
+  async function unlock() {
+    admin = $("token").value.trim() || admin;
+    try { await adminCall({ action: "check" }); unlocked = true; localStorage.setItem("cs220p:admin", admin); $("reset").disabled = false; $("adminMsg").textContent = "Unlocked."; load(); }
+    catch (e) { unlocked = false; $("adminMsg").textContent = "Wrong token."; }
+  }
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("button"); if (!t) return;
+    if (t.dataset.id) { if (confirm("Delete this submission? The student can then submit again.")) { await adminCall({ action: "deleteAnswer", id: +t.dataset.id }); load(); } }
+    else if (t.id === "check") unlock();
+    else if (t.id === "reset") { if (confirm("Delete every submission of this activity?")) { const d = await adminCall({ action: "resetExercise", lab, exercise }); $("adminMsg").textContent = `Deleted ${d.deleted}.`; load(); } }
+  });
+  if (admin) { $("token").value = admin; unlock(); }
+  load(); setInterval(load, 4000);
+})();
+</script>
+</body>
+</html>

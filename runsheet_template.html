@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>CS220P run sheet (TA)</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#243041;--ink-2:#3d4a5f;--muted:#6f7c90;--paper:#f7f9fc;--panel:#fff;--line:#e4e9f1;--lagoon:#5b7cfa;--sand:#fff4cc;--sand-2:#f3d98a;--coral:#ee8a84;--mint:#dcf3ea;--mint-2:#2f9a78;--warn:#c07a12;--bad:#d64545;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--ink:#e8ecf4;--ink-2:#c9d2e3;--muted:#93a0b8;--paper:#171c26;--panel:#1f2633;--line:#2f3847;--lagoon:#8fa6ff;--sand:#3b3524;--sand-2:#7d6a3a;--coral:#ff9a94;--mint:#1f3d33;--mint-2:#7fd1b9;--warn:#e9b04c;--bad:#ff7b7b;color-scheme:dark}}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+h1,h2,h3{font-family:"Bricolage Grotesque","Public Sans",system-ui,sans-serif;line-height:1.15;margin:0 0 .4em;font-weight:600}
+a{color:var(--lagoon)}
+button,input,select{font:inherit}
+button{cursor:pointer;border:1px solid var(--lagoon);background:var(--lagoon);color:#fff;border-radius:8px;padding:.35em .85em}
+button.ghost{background:transparent;color:var(--lagoon)}
+input{color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.3em .5em}
+input[type=number]{width:5.5em}
+.num{font-variant-numeric:tabular-nums}
+
+header{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--line);padding:.6rem 1rem .7rem}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1.2rem}
+.brand{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;color:var(--muted);font-size:.95rem}
+.tabs,.views{display:flex;gap:.25rem}
+.tabs button,.views button{background:transparent;color:var(--ink-2);border:1px solid var(--line)}
+.tabs button.on,.views button.on{background:var(--sand);color:var(--ink);border-color:var(--sand-2);font-weight:600}
+.ctl{display:flex;align-items:center;gap:.4rem;font-size:.9rem;color:var(--ink-2)}
+.timer{display:flex;align-items:center;gap:.5rem;margin-left:auto}
+#clock{font-size:1.35rem;font-weight:600;min-width:4.5ch;text-align:right}
+.hint{font-size:.8rem;color:var(--muted)}
+
+.timeline{position:relative;display:flex;height:48px;margin-top:.6rem;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg{all:unset;box-sizing:border-box;flex-basis:0;min-width:0;padding:4px 6px;border-right:1px solid var(--line);font-size:11px;line-height:1.3;color:var(--muted);cursor:pointer;overflow:hidden}
+.seg:last-child{border-right:0}
+.seg b{display:block;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.seg span{white-space:nowrap}
+.seg.done{opacity:.5}
+.seg.tour{box-shadow:inset 0 3px 0 var(--coral)}
+.seg.cur{background:var(--sand);box-shadow:inset 0 -3px 0 var(--lagoon)}
+.seg.cur.tour{box-shadow:inset 0 3px 0 var(--coral),inset 0 -3px 0 var(--lagoon)}
+.cursor{position:absolute;top:0;bottom:0;width:2px;background:var(--bad);pointer-events:none;display:none}
+
+.wrap{display:grid;grid-template-columns:310px minmax(0,1fr);gap:1.2rem;padding:1rem;max-width:1500px;margin:0 auto}
+@media (max-width:900px){.wrap{grid-template-columns:1fr}}
+aside{position:sticky;top:var(--hdr,130px);align-self:start;max-height:calc(100vh - var(--hdr,130px) - 1rem);overflow:auto}
+aside h2{font-size:1.1rem;margin:.2rem 0}
+aside .meta{font-size:.85rem;color:var(--muted);margin-bottom:.6rem}
+.agenda{list-style:none;margin:0;padding:0}
+.agenda button{all:unset;box-sizing:border-box;display:grid;grid-template-columns:1.7em 1fr auto;gap:0 .4rem;width:100%;padding:.4rem .5rem;border-radius:8px;cursor:pointer;font-size:.9rem}
+.agenda button:hover{background:var(--panel)}
+.agenda .n{color:var(--muted)}
+.agenda .t{color:var(--ink-2)}
+.agenda .w{grid-column:2/4;font-size:.78rem;color:var(--muted)}
+.agenda .m{font-size:.8rem;color:var(--muted);text-align:right}
+.agenda li.tour .t{color:var(--coral);font-weight:600}
+.agenda li.cur button{background:var(--sand)}
+.agenda li.cur .t{color:var(--ink);font-weight:600}
+.agenda li.done .t{color:var(--muted)}
+.act.ok{color:var(--mint-2)} .act.over{color:var(--bad)}
+.legend{font-size:.78rem;color:var(--muted);margin-top:.6rem}
+
+.now{display:flex;flex-wrap:wrap;gap:.4rem 1.5rem;align-items:flex-end;justify-content:space-between;margin-bottom:1rem}
+.kicker{color:var(--muted);font-size:.9rem}
+.now h1{font-size:clamp(1.5rem,2.8vw,2.2rem);margin:.15rem 0 .3rem}
+.countdown{text-align:right}
+#left{font-size:2.6rem;font-weight:700;line-height:1}
+#left.ok{color:var(--mint-2)} #left.warn{color:var(--warn)} #left.over{color:var(--bad)} #left.idle{color:var(--muted);font-size:1.4rem}
+#pace{font-size:.85rem;color:var(--muted);margin-top:.3rem}
+.links{display:flex;gap:.8rem;flex-wrap:wrap;font-size:.92rem}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem}
+.card h2{font-size:1rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.6rem}
+.card.notes{border-left:4px solid var(--lagoon)}
+.card.task{border-left:4px solid var(--mint-2)}
+.card.cover{border-left:4px solid var(--sand-2)}
+.card.tourproc{border-left:4px solid var(--coral)}
+.cover ol{margin:0 0 .7rem;padding-left:1.2rem}
+.chips{display:flex;flex-wrap:wrap;gap:.35rem}
+.chip{background:var(--sand);border-radius:999px;padding:.1rem .6rem;font-size:.85rem}
+.notes .q{font-weight:600;margin-bottom:.4rem}
+.notes .a{margin:.45rem 0;padding-left:.7rem;border-left:2px solid var(--line)}
+details.card{margin-top:1rem}
+details.card>summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+details .body{margin-top:.6rem}
+.next{margin-top:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;color:var(--muted)}
+.empty{color:var(--muted);font-style:italic}
+
+.script section.step{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid var(--line);scroll-margin-top:calc(var(--hdr,130px) + .5rem)}
+.script .shead{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:baseline}
+.script .shead h2{font-size:1.35rem}
+
+@media print{
+  header .bar>:not(.brand),.timeline,aside,.links,.next,.hint{display:none!important}
+  header{position:static}
+  .wrap{display:block;padding:0}
+  .card{break-inside:avoid}
+  details.card>.body{display:block}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="brand">CS220P run sheet · TA</span>
+    <div class="tabs" id="tabs"></div>
+    <div class="views" id="views"><button data-v="live">Live</button><button data-v="script">Full script</button></div>
+    <label class="ctl">Start <input type="time" id="start"></label>
+    <label class="ctl">Fit to <input type="number" id="fit" min="10" step="5"> min</label>
+    <div class="timer">
+      <span class="hint">elapsed</span><span id="clock" class="num">0:00</span>
+      <button id="toggle">Start</button>
+      <button class="ghost" id="reset">Reset</button>
+    </div>
+  </div>
+  <div class="timeline" id="timeline"><div class="cursor" id="cursor"></div></div>
+  <div class="hint">Keys: → next step · ← previous step · Space start/pause the timer. The timer, actual times and settings are saved in this browser, per lab.</div>
+</header>
+<div class="wrap">
+  <aside>
+    <h2 id="labtitle"></h2>
+    <div class="meta" id="labmeta"></div>
+    <ol class="agenda" id="agenda"></ol>
+    <div class="legend">Right column: planned minutes, then the time actually spent once the timer has run (green within plan, red over).</div>
+  </aside>
+  <main id="main"></main>
+</div>
+<script type="application/json" id="data">/*__DATA__*/</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById("data").textContent);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fresh = () => ({ start: "", fit: 0, running: false, startedAt: 0, acc: 0, mark: 0, cur: 0, actual: {} });
+  const key = (id) => "cs220p:runsheet:" + id;
+  const load = (id) => { try { return Object.assign(fresh(), JSON.parse(localStorage.getItem(key(id)) || "{}")); } catch (e) { return fresh(); } };
+  let labId = DATA.labs[0].id, view = "live", S = load(labId);
+  const save = () => { try { localStorage.setItem(key(labId), JSON.stringify(S)); } catch (e) {} };
+  const lab = () => DATA.labs.find((l) => l.id === labId);
+  const elapsed = () => S.acc + (S.running ? (Date.now() - S.startedAt) / 1000 : 0);
+  const started = () => S.running || S.acc > 0;
+
+  function plan() {
+    const steps = lab().steps, total = steps.reduce((a, s) => a + s.time, 0);
+    const k = S.fit > 0 ? S.fit / total : 1;
+    let t = 0;
+    const p = steps.map((s) => { const d = s.time * k * 60, r = { start: t, end: t + d, dur: d }; t += d; return r; });
+    p.total = t; p.planned = total;
+    return p;
+  }
+  const mmss = (sec) => {
+    sec = Math.round(Math.abs(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+  };
+  const mins = (sec) => Math.round(sec / 60);
+  function clock(off) {
+    if (!S.start) { const m = Math.round(off / 60); return "+" + Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"); }
+    const [h, m] = S.start.split(":").map(Number), t = h * 60 + m + Math.round(off / 60);
+    return String(Math.floor(t / 60) % 24).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+  }
+  const win = (p) => clock(p.start) + "–" + clock(p.end);
+
+  /* parse the step's theory once for the "cover" card: section headings and bold key terms */
+  function cover(s) {
+    if (s._cover) return s._cover;
+    const t = document.createElement("template"); t.innerHTML = s.theory || "";
+    const heads = [...t.content.querySelectorAll("h3,h4")].map((e) => e.textContent.trim()).filter(Boolean);
+    const seen = new Set(), terms = [];
+    t.content.querySelectorAll("b,strong").forEach((e) => { const x = e.textContent.trim(); const k = x.toLowerCase(); if (x.length > 3 && x.length < 60 && !seen.has(k)) { seen.add(k); terms.push(x); } });
+    return (s._cover = { heads, terms });
+  }
+
+  /* timer bookkeeping: time spent on a step accrues from S.mark to now */
+  function commit() {
+    const e = elapsed(), id = lab().steps[S.cur].id;
+    S.actual[id] = (S.actual[id] || 0) + (e - S.mark); S.mark = e;
+  }
+  const spent = (i) => { const id = lab().steps[i].id; return (S.actual[id] || 0) + (i === S.cur ? elapsed() - S.mark : 0); };
+  function go(i) {
+    const n = lab().steps.length; i = Math.max(0, Math.min(n - 1, i));
+    if (i === S.cur) return;
+    commit(); S.cur = i; save(); render();
+    if (view === "script") document.getElementById("s-" + i)?.scrollIntoView({ behavior: "smooth" });
+    else window.scrollTo({ top: 0 });
+  }
+  function toggle() {
+    if (S.running) { S.acc = elapsed(); S.running = false; } else { S.startedAt = Date.now(); S.running = true; }
+    save(); render();
+  }
+  function reset() {
+    if (!confirm("Reset the timer and the recorded times for " + lab().title + "?")) return;
+    S = Object.assign(fresh(), { start: S.start, fit: S.fit }); save(); render();
+  }
+  function setLab(id) {
+    if (!DATA.labs.some((l) => l.id === id)) return;
+    labId = id; S = load(id); render();
+  }
+
+  function stepBody(s, i, l, live) {
+    const c = cover(s), task = s.task ? s.task : "<span class='empty'>No student task for this step.</span>";
+    const coverHtml = (c.heads.length ? "<ol>" + c.heads.map((h) => "<li>" + esc(h) + "</li>").join("") + "</ol>" : "") +
+      (c.terms.length ? "<div class='chips'>" + c.terms.map((t) => "<span class='chip'>" + esc(t) + "</span>").join("") + "</div>" : "");
+    return "<div class='grid'>" +
+      "<section class='card cover'><h2>Cover</h2>" + (coverHtml || "<span class='empty'>See the theory text.</span>") + "</section>" +
+      (s.ask ? "<section class='card notes'><h2>Teaching notes</h2>" + s.ask + "</section>" : "") +
+      "<section class='card task'><h2>Students do</h2>" + task + "</section>" +
+      (s.tour && DATA.tournament ? "<section class='card tourproc'><h2>Tournament procedure</h2>" + DATA.tournament + "<p><a href='" + DATA.site + "/leaderboard.html' target='cs220p-board'>Open the live leaderboard ↗</a> (project it during the tournament).</p></section>" : "") +
+      "</div>" +
+      "<details class='card'" + (live ? "" : " open") + "><summary>Theory text (what students read on screen)</summary><div class='body'>" + s.theory + "</div></details>" +
+      (s.deeper ? "<details class='card'><summary>Going deeper (graduate level)</summary><div class='body'>" + s.deeper + "</div></details>" : "");
+  }
+
+  function renderMain(p) {
+    const l = lab(), steps = l.steps, main = $("main");
+    if (view === "script") {
+      main.className = "script";
+      main.innerHTML = steps.map((s, i) => "<section class='step' id='s-" + i + "'><div class='shead'><h2>" + (i + 1) + ". " + esc(s.title) + "</h2><span class='kicker num'>" + win(p[i]) + " · " + mins(p[i].dur) + " min · <a href='" + DATA.site + "/" + l.file + "#" + s.id + "' target='cs220p-lab'>open in the lab ↗</a></span></div>" + stepBody(s, i, l, false) + "</section>").join("");
+      return;
+    }
+    main.className = "";
+    const i = S.cur, s = steps[i], nx = steps[i + 1];
+    main.innerHTML =
+      "<div class='now'><div><div class='kicker num'>" + esc(l.title) + " · step " + (i + 1) + " of " + steps.length + " · " + win(p[i]) + " · " + mins(p[i].dur) + " min planned</div>" +
+      "<h1>" + (s.tour ? "★ " : "") + esc(s.title) + "</h1>" +
+      "<div class='links'><a href='" + DATA.site + "/" + l.file + "#" + s.id + "' target='cs220p-lab'>Open this step in the lab ↗</a></div></div>" +
+      "<div class='countdown'><div id='left' class='num'></div><div id='pace' class='num'></div></div></div>" +
+      stepBody(s, i, l, true) +
+      "<div class='next'><span>" + (nx ? "Up next: <b>" + esc(nx.title) + "</b> (" + mins(p[i + 1].dur) + " min)" : "Last step.") + "</span>" +
+      "<span><button class='ghost' id='prev'" + (i ? "" : " disabled") + ">← Previous</button> <button id='nextb'" + (nx ? "" : " disabled") + ">Next step →</button></span></div>";
+    $("prev").onclick = () => go(S.cur - 1);
+    $("nextb").onclick = () => go(S.cur + 1);
+  }
+
+  function render() {
+    const l = lab(), p = plan();
+    document.title = "Run sheet · " + l.title;
+    if (location.hash.slice(1) !== labId) history.replaceState(null, "", "#" + labId);
+    $("tabs").innerHTML = DATA.labs.map((x) => "<button data-l='" + x.id + "' class='" + (x.id === labId ? "on" : "") + "'>" + esc(x.short) + "</button>").join("");
+    $("views").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === view));
+    $("start").value = S.start; $("fit").value = S.fit || ""; $("fit").placeholder = p.planned;
+    $("labtitle").textContent = l.title;
+    $("labmeta").innerHTML = esc(l.day) + "<br>" + esc(l.hook) + "<br>Planned: " + p.planned + " min" + (S.fit ? " · fitted to " + S.fit + " min" : "") + " · " + clock(0) + "–" + clock(p.total);
+    $("timeline").innerHTML = l.steps.map((s, i) => "<button class='seg" + (s.tour ? " tour" : "") + (i === S.cur ? " cur" : i < S.cur ? " done" : "") + "' data-i='" + i + "' style='flex-grow:" + p[i].dur + "' title='" + esc((i + 1) + ". " + s.title + " · " + win(p[i])) + "'><b>" + (i + 1) + ". " + esc(s.title) + "</b><span class='num'>" + clock(p[i].start) + " · " + mins(p[i].dur) + "′</span></button>").join("") + "<div class='cursor' id='cursor'></div>";
+    $("agenda").innerHTML = l.steps.map((s, i) => "<li class='" + (s.tour ? "tour " : "") + (i === S.cur ? "cur" : i < S.cur ? "done" : "") + "'><button data-i='" + i + "'><span class='n num'>" + (s.tour ? "★" : i + 1) + "</span><span class='t'>" + esc(s.title) + "</span><span class='m num'>" + mins(p[i].dur) + "′ <span class='act' id='act-" + i + "'></span></span><span class='w num'>" + win(p[i]) + "</span></button></li>").join("");
+    renderMain(p);
+    $("toggle").textContent = S.running ? "Pause" : started() ? "Resume" : "Start";
+    document.documentElement.style.setProperty("--hdr", document.querySelector("header").offsetHeight + "px");
+    tick();
+  }
+
+  function tick() {
+    const p = plan(), e = elapsed(), i = S.cur, cur = p[i];
+    $("clock").textContent = mmss(e);
+    const cursor = $("cursor");
+    cursor.style.display = started() ? "block" : "none";
+    cursor.style.left = Math.min(100, (e / p.total) * 100) + "%";
+    lab().steps.forEach((s, j) => {
+      const a = $("act-" + j); if (!a) return;
+      const t = spent(j);
+      a.textContent = t >= 1 ? "/ " + mmss(t) : "";
+      a.className = "act " + (t > p[j].dur ? "over" : "ok");
+    });
+    const left = $("left"), pace = $("pace");
+    if (!left) return;
+    if (!started()) { left.className = "idle"; left.textContent = mmss(cur.dur) + " planned"; pace.textContent = "Timer not started · Space to start"; return; }
+    const rem = cur.end - e;
+    if (e < cur.start) { left.className = "ok"; left.textContent = mmss(cur.end - e) + " left"; }
+    else if (rem >= 0) { left.className = rem < Math.min(120, cur.dur * 0.2) ? "warn" : "ok"; left.textContent = mmss(rem) + " left"; }
+    else { left.className = "over"; left.textContent = mmss(rem) + " over"; }
+    const remCur = e < cur.start ? cur.dur : Math.max(0, rem);
+    const proj = e + remCur + (p.total - cur.end), delta = proj - p.total;
+    const lag = e < cur.start ? "ahead of plan by " + mmss(cur.start - e) : e > cur.end ? "behind plan by " + mmss(e - cur.end) : "on plan";
+    pace.textContent = "In this step " + mmss(spent(i)) + " · " + lag + " · projected end " + clock(proj) + (Math.abs(delta) >= 60 ? " (" + (delta > 0 ? "+" : "−") + mins(Math.abs(delta)) + " min)" : "");
+  }
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target.closest("button"); if (!t) return;
+    if (t.dataset.l) setLab(t.dataset.l);
+    else if (t.dataset.v) { view = t.dataset.v; render(); if (view === "script") document.getElementById("s-" + S.cur)?.scrollIntoView(); }
+    else if (t.dataset.i !== undefined) go(Number(t.dataset.i));
+  });
+  $("toggle").onclick = toggle;
+  $("reset").onclick = reset;
+  $("start").onchange = (ev) => { S.start = ev.target.value; save(); render(); };
+  $("fit").onchange = (ev) => { const v = Number(ev.target.value); S.fit = v > 0 ? v : 0; save(); render(); };
+  document.addEventListener("keydown", (ev) => {
+    if (ev.target.closest("input,textarea,select") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (ev.key === "ArrowRight") { ev.preventDefault(); go(S.cur + 1); }
+    else if (ev.key === "ArrowLeft") { ev.preventDefault(); go(S.cur - 1); }
+    else if (ev.key === " ") { ev.preventDefault(); toggle(); }
+  });
+  addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id !== labId) setLab(id); });
+  addEventListener("storage", (ev) => { if (ev.key === key(labId)) { S = load(labId); render(); } });
+  addEventListener("resize", () => document.documentElement.style.setProperty("--hdr", document.querySelector("header").offsetHeight + "px"));
+
+  const h = location.hash.slice(1); if (DATA.labs.some((l) => l.id === h)) { labId = h; S = load(h); }
+  render();
+  setInterval(tick, 500);
+})();
+</script>
+</body>
+</html>

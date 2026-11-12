@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS220P live leaderboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css">
+<style>
+body{max-width:1200px;margin:0 auto;padding:1.5rem clamp(1rem,3vw,2.5rem) 4rem}
+.top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem 1rem}
+.live{font-size:.85rem;color:var(--muted)} .live b{color:var(--mint-2)}
+.podium{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:1rem 0 1.5rem;align-items:end}
+.podium .medal{font-size:2rem}
+.podium > div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem;text-align:center}
+.podium > .p1{border-color:var(--sand-2);background:var(--sand);padding:1.6rem 1rem}
+.podium .nm{font-family:"Bricolage Grotesque",sans-serif;font-size:clamp(1.1rem,2.2vw,1.6rem);font-weight:700}
+.podium .pt{font-size:clamp(1.4rem,3vw,2.4rem);font-weight:700;font-variant-numeric:tabular-nums}
+.grid2{display:grid;grid-template-columns:2fr 1fr;gap:1.5rem}
+@media (max-width:860px){.grid2,.podium{grid-template-columns:1fr}}
+.leader td,.leader th{font-size:1rem}
+.empty{color:var(--muted);font-style:italic}
+.admin{margin-top:2.5rem}
+.admin summary{cursor:pointer;color:var(--muted)}
+button.del{padding:.15em .6em;font-size:.8rem}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><div class="brand" style="color:var(--muted);font-weight:600"><a href="index.html" style="color:inherit;text-decoration:none">CS220P Data Analytics</a></div><h1 id="title">Live leaderboard</h1></div>
+  <div class="live" id="live">connecting…</div>
+</div>
+<div class="tabs" id="tabs"></div>
+<div id="podium" class="podium"></div>
+<div class="grid2">
+  <div><h2>Players</h2><div class="wide" id="players"></div></div>
+  <div><h2>Teams</h2><div class="wide" id="teams"></div><p class="note">Teams are ranked by their average, so every member counts.</p></div>
+</div>
+<details class="admin" id="admin"><summary>Admin (TA)</summary>
+  <p class="note">Enter the admin token to delete a run (the student can then submit again) or reset a lab. The token is kept on this device only.</p>
+  <div class="btns"><input type="password" id="token" placeholder="admin token" style="min-width:16rem"><button id="check">Unlock</button><button class="danger" id="reset" disabled>Reset this lab</button></div>
+  <p class="note" id="adminMsg"></p>
+  <div id="activities"></div>
+</details>
+<script>
+(() => {
+  const NAMES = { L1: "Lab 1 · Cooling league", L2: "Lab 2 · Dispatch league", L3: "Lab 3 · Cleaning challenge", L4: "Lab 4 · Diagnosis league" };
+  /* class activities whose submissions the TA sees here after unlocking (L1/properties and L2/reportcard are private: the server needs the token) */
+  const ACTIVITIES = [["L1", "properties", "Lab 1 · step 2 quiz: properties of the task environment"], ["L2", "reportcard", "Lab 2 · step 2 report card: the uninformed strategies"], ["L2", "byhand", "Lab 2 · hand-run challenge"]];
+  const took = (s) => (s == null ? "–" : s >= 60 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmt = (x, d = 0) => (Math.round(x * 10 ** d) / 10 ** d).toLocaleString("en-US", { maximumFractionDigits: d });
+  let lab = /^#L\d+$/.test(location.hash) ? location.hash.slice(1) : "L1", seen = new Set(), first = true, admin = localStorage.getItem("cs220p:admin") || "", unlocked = false, timer = null;
+
+  function settings(row, params) {
+    return params.map((p) => { const v = row.params[p.key]; const o = p.options && p.options.find((x) => String(x.value) === String(v)); return `${esc(p.label)}: <b>${esc(o ? o.label : v)}</b>`; }).join(" · ");
+  }
+  function render(data) {
+    $("title").textContent = NAMES[lab] || lab;
+    $("tabs").innerHTML = data.labs.map((l) => `<button class="${l === lab ? "on" : ""}" data-l="${l}">${esc(NAMES[l] || l)}</button>`).join("");
+    const rows = data.rows;
+    const medals = ["🥇", "🥈", "🥉"];
+    const unit = esc(data.unit || "points");
+    $("podium").innerHTML = rows.length ? [1, 0, 2].filter((i) => rows[i]).map((i) => `<div class="p${i + 1}"><div class="medal">${medals[i]}</div><div class="nm">${esc(rows[i].name)}</div><div class="note">team ${esc(rows[i].team)}</div><div class="pt">${fmt(rows[i].points)}</div><div class="note">${unit}</div></div>`).join("") : "";
+    let rank = 0, prev = null;
+    $("players").innerHTML = rows.length ? `<table class="leader"><tr><th>#</th><th>Name</th><th>Team</th><th>Settings</th><th>${unit}</th>${unlocked ? "<th></th>" : ""}</tr>${rows.map((r, i) => { if (r.points !== prev) { rank = i + 1; prev = r.points; } const isNew = !first && !seen.has(r.id); return `<tr class="${isNew ? "new" : ""}"><td>${rank}</td><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td class="note">${settings(r, data.params)}</td><td class="pts">${fmt(r.points)}</td>${unlocked ? `<td><button class="ghost del" data-id="${r.id}">delete</button></td>` : ""}</tr>`; }).join("")}</table>` : `<p class="empty">No official runs yet. They appear here as soon as they are submitted.</p>`;
+    const teams = {};
+    rows.forEach((r) => (teams[r.team] ??= []).push(r.points));
+    const tl = Object.entries(teams).map(([t, ps]) => ({ t, n: ps.length, avg: ps.reduce((a, b) => a + b, 0) / ps.length, best: Math.max(...ps) })).sort((a, b) => b.avg - a.avg);
+    $("teams").innerHTML = tl.length ? `<table class="leader"><tr><th>Team</th><th>Players</th><th>Best</th><th>Average (${unit})</th></tr>${tl.map((x) => `<tr><td>${esc(x.t)}</td><td>${x.n}</td><td>${fmt(x.best)}</td><td class="pts">${fmt(x.avg)}</td></tr>`).join("")}</table>` : `<p class="empty">No teams yet.</p>`;
+    seen = new Set(rows.map((r) => r.id)); first = false;
+    $("live").innerHTML = `<b>●</b> live · ${rows.length} official run${rows.length === 1 ? "" : "s"} · updated ${new Date().toLocaleTimeString()}`;
+  }
+  async function load() {
+    try {
+      const r = await fetch(`/api/leaderboard?lab=${encodeURIComponent(lab)}`, { cache: "no-store" });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.status);
+      render(data);
+    } catch (e) { $("live").textContent = "offline: retrying…"; }
+  }
+  function select(l) { lab = l; seen = new Set(); first = true; history.replaceState(null, "", "#" + l); load(); }
+  async function adminCall(body) {
+    const r = await fetch("/api/admin", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + admin }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.status);
+    return data;
+  }
+  async function loadActivities() {
+    if (!unlocked) { $("activities").innerHTML = ""; return; }
+    const parts = await Promise.all(ACTIVITIES.map(async ([l, ex, title]) => {
+      let rows = [];
+      try { const r = await fetch(`/api/answers?lab=${l}&exercise=${ex}`, { cache: "no-store", headers: { authorization: "Bearer " + admin } }); const d = await r.json(); if (r.ok) rows = d.rows; } catch (e) {}
+      const avg = rows.length ? rows.reduce((a, r) => a + r.score / r.max, 0) / rows.length : 0;
+      const secs = rows.map((r) => r.answers && r.answers._seconds).filter((s) => typeof s === "number"), avgS = secs.length ? Math.round(secs.reduce((a, b) => a + b, 0) / secs.length) : null;
+      const table = rows.length ? `<table class="leader"><tr><th>#</th><th>Name</th><th>Team</th><th>Score</th><th>Time taken</th><th>Submitted at</th><th></th></tr>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td class="pts">${fmt(r.score, 1)} / ${fmt(r.max)}</td><td>${took(r.answers && r.answers._seconds)}</td><td class="note">${new Date(r.created_at).toLocaleTimeString()}</td><td><button class="ghost del" data-answer="${r.id}">delete</button></td></tr>`).join("")}</table>` : `<p class="empty">No submissions yet.</p>`;
+      return `<h3>${esc(title)}</h3><p class="note">${rows.length} submitted${rows.length ? ` · average ${fmt(avg * 100)}%` : ""}${avgS != null ? ` · average time ${took(avgS)}` : ""} · <a href="activity.html#${l}/${ex}" target="_blank">score distribution and answers per card ↗</a></p><div class="wide">${table}</div>`;
+    }));
+    $("activities").innerHTML = `<h2>Class activities</h2>` + parts.join("");
+  }
+  async function unlock() {
+    admin = $("token").value.trim() || admin;
+    try { await adminCall({ action: "check" }); unlocked = true; localStorage.setItem("cs220p:admin", admin); $("adminMsg").textContent = "Unlocked: delete buttons are shown in the players table; class activities are listed below."; $("reset").disabled = false; load(); loadActivities(); }
+    catch (e) { unlocked = false; $("reset").disabled = true; $("adminMsg").textContent = "Wrong token."; loadActivities(); }
+  }
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("button"); if (!t) return;
+    if (t.dataset.l) select(t.dataset.l);
+    else if (t.dataset.id) { if (confirm("Delete this official run? The student can then submit again.")) { await adminCall({ action: "delete", id: +t.dataset.id }); load(); } }
+    else if (t.dataset.answer) { if (confirm("Delete this submission? The student can then submit again.")) { await adminCall({ action: "deleteAnswer", id: +t.dataset.answer }); loadActivities(); } }
+    else if (t.id === "check") unlock();
+    else if (t.id === "reset") { if (confirm(`Delete every official run of ${NAMES[lab] || lab}?`)) { const d = await adminCall({ action: "reset", lab }); $("adminMsg").textContent = `Deleted ${d.deleted} runs.`; load(); } }
+  });
+  addEventListener("hashchange", () => { if (/^#L\d+$/.test(location.hash) && location.hash.slice(1) !== lab) select(location.hash.slice(1)); });
+  if (admin) { $("token").value = admin; unlock(); }
+  load(); timer = setInterval(() => { load(); loadActivities(); }, 4000);
+})();
+</script>
+</body>
+</html>

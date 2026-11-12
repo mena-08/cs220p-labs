@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS220P Lab 1: Intelligent agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<script src="lab.js"></script>
+<script>
+window.LAB_TASKS = {
+scenario: `Play with the hall diagram to see what cooling costs, guess the four PEAS rows of the cooling controller in your own words, reveal the answer and compare, play one day of the finished agent, and read its cost receipt.`,
+environment: `Classify four industrial agents on six properties and get at least 20 of 24 right before showing the answers; then read the reasons for the cards you got wrong.`,
+beat: `Plan the cooling level for each 2-hour block of day 131: find the lowest flat plan with zero minutes above 27 °C, then lower blocks one by one until the day stays within its budget of 3,480 SAR, and then 200 SAR under it. Note what information you were missing while planning.`,
+reflex: `Tune T_set, HIGH and LOW: zero minutes above 27 °C on day 101, then within the day's budget, then lose less than 2,000 SAR over the 10 practice days; finally break your own safe rule with a heat wave and explain in one sentence why the same rule fails.`,
+model: `Tune target, gain K and prediction horizon: zero minutes on day 101, lose less than 1,500 SAR over the 10 practice days, and settings that make the command change direction 40 times. Name the variables that form the agent's internal state.`,
+goal: `Reach zero minutes on day 101 twice: once by running cold with a lookahead of 3 or less, once by looking ahead, the second time at least 280 SAR under the day's budget; then stay within budget on all 10 days with at least 1,800 SAR left. Relate the lookahead you needed to the cooling ramp (62% of a change in 60 minutes).`,
+utility: `Tune w_viol and the horizon: at least 270 SAR under budget on day 101, at least 1,450 SAR left over the 10 practice days, and zero minutes in a 5 °C heat wave. Decide which w_viol a rational operator should use when the performance measure is money.`,
+learning: `Find the fewest logged days that give the true constants, the fewest that already give zero minutes on day 101, and keep at least 1,600 SAR of the budget over the 10 practice days. Explain why a perfect controller would have produced worse training data.`,
+measure: `Use the measure menu and the heat-wave slider: find the heat at which the risk-neutral utility agent leaves the tie under never violate, and the heat at which the cautious one becomes cheaper on the bill. Explain why the energy-only winner is a bad controller.`,
+tournament: `Choose an agent type, tune it on the practice days, check it with the heat-wave slider in steps 4 to 8, then do your single official run. Your score is the money left in the budget over the hidden days; anything above zero means you stayed within budget overall.`,
+};
+
+window.LAB_DEEPER = {
+scenario: `<p>Formally, an agent is a function f: P* → A from percept sequences to actions. Rationality: for every percept sequence, pick the action that maximizes the <i>expected</i> value of the performance measure given the sequence and the agent's prior knowledge. Our controller is a partially observable Markov decision process (POMDP): hidden state s = (T<sub>true</sub>, cooling state), observation o = T<sub>true</sub> + ε with ε ~ N(0, 0.3²), action u ∈ {0,…,10}, reward r = −(energy cost + penalty). The utility-based agent of step 7 is a receding-horizon controller, which the control community calls model predictive control (MPC); it is the standard way HVAC and chemical plants are run, and the baseline DeepMind had to beat.</p>`,
+environment: `<p>Observability decides the state representation: in a fully observable MDP the policy is a function of the current state, π(s); in a POMDP the optimal policy is a function of the belief state b(s) = P(s | percept history), which is why the model-based agent needs memory. Sequential vs episodic decides whether the problem needs dynamic programming or plain classification. "Known" is about the transition model P(s' | s, a): step 8 estimates it, which is the system-identification half of reinforcement learning.</p>`,
+model: `<p>The transition model is a first-order linear ODE: C·dT/dt = L(t) + k·(T<sub>out</sub> − T) − Q(t), discretized with Δt = 1/6 h. Its open-loop time constant is τ = C/k = 8 h, so the hall is slow to equilibrate; the actuator is another first-order lag, Q<sub>eff</sub> ← Q<sub>eff</sub> + 0.15·(Q<sub>cmd</sub> − Q<sub>eff</sub>) per step, time constant ≈ 1/0.15 ≈ 6.7 steps ≈ 67 min. Two lags in series are what make a thermostat oscillate: the loop gain at the oscillation frequency exceeds one. The exponential moving average T<sub>f</sub> ← 0.5 T<sub>f</sub> + 0.5 T<sub>m</sub> is a one-parameter Kalman filter; the slope extrapolation is a first-order Taylor prediction. The incremental law u ← u + K(T<sub>pred</sub> − target) is integral control: it has no steady-state error but adds phase lag, which is why large K destabilizes it.</p>`,
+goal: `<p>The feed-forward term is the inverse of the steady-state model: setting dT/dt = 0 gives Q* = L + k(T<sub>out</sub> − T<sub>target</sub>), so u* = Q*/gain. Feed-forward from a known disturbance (the schedule) plus a small feedback correction is a classic two-degree-of-freedom controller. In AI terms the schedule turns an unobserved future into a known one, and the goal test "T ≤ 27 for all future t" is a safety constraint; checking it requires simulating forward, i.e. search in the space of action sequences (next lecture).</p>`,
+utility: `<p>Expected utility is justified by the von Neumann-Morgenstern axioms: a rational preference order over lotteries is representable by a utility whose expectation is maximized. Our agent evaluates only constant action sequences over the horizon, 11 candidates instead of 11<sup>H</sup> sequences; full dynamic programming over the belief state is intractable here, and MPC is the practical compromise. The soft penalty 1000·σ((T − 26.5)/0.3) is a smooth surrogate for the indicator of a violation, i.e. an approximate expectation under the prediction error. The need for H to exceed the actuator time constant is the receding-horizon stability condition: a horizon shorter than the plant's response makes the controller myopic.</p>`,
+learning: `<p>Fitting (C, k, gain) from logged transitions is linear least squares after the substitution a = Δt/C, b = k·Δt/C, c = gain·Δt/C: ΔT = a·L + b·(T<sub>out</sub> − T) − c·u<sub>eff</sub>. Identifiability requires persistent excitation: if the controller holds T constant, the regressors are collinear and the normal equations are singular, which is why the logged days come from a crude thermostat. This is the exploration-exploitation trade-off in its original control-theoretic form (dual control). The four-component learning agent of the lecture maps onto model-based reinforcement learning: performance element = policy, critic = value or error signal, learning element = model update, problem generator = exploration policy.</p>`,
+measure: `<p>Optimizing a proxy is Goodhart's law; in the RL literature it is reward hacking or specification gaming. The lecture's advice (reward the state of the world, not the agent's behavior) is the design principle behind constrained optimization: minimize energy subject to T ≤ 27, which the penalty term turns into a Lagrangian with multiplier 1000 SAR per step. Changing the multiplier changes the optimal policy, which is exactly what the w_viol slider shows.</p>`,
+};
+
+/* Lab 1: Intelligent agents. Scenario: cooling controller for a data center hall */
+(function () {
+  const { h, RNG, fmt, mean, range, select, metric, canvas, css, quiz, tournament, clamp, sleep, tween, pulse, examples, callout, mission } = Lab;
+  const { exp, pow, abs } = Math;                 // local names: the hot loops below avoid global lookups
+  const STEPS = 144, DT = 1 / 6;                 // 10-minute steps, one day
+  const LIMIT = 27, PENALTY = 1000;               // °C inlet limit (ASHRAE A1), SAR per 10 min above it
+  const TRUE = { cth: 0.4, kenv: 0.05, gain: 0.5, lag: 0.15 };   // MWh/°C, MW/°C, MW per cooling level, actuator response per step
+  const GUESS = { cth: 0.7, kenv: 0.03, gain: 0.62, lag: 0.15 };  // what the designer believed before measuring
+  const price = (t) => { const hr = (t * DT) % 24; return hr >= 13 && hr < 17 ? 0.48 : hr >= 22 || hr < 8 ? 0.18 : 0.32; };   // SAR per kWh
+  const PRICE = Array.from({ length: STEPS }, (_, t) => price(t));
+  const cop = (to) => 5.5 - 0.1 * (to - 25);
+  const coolPower = (ueff, to) => 0.25 * Math.pow(ueff / 10, 3) + (TRUE.gain * ueff) / cop(to);   // MW electrical: fans (cube law) + the cooling units' compressors
+  const UDEF = { wviol: 1, horizon: 6, wwear: 0 };
+
+  function day(seed, p = {}) {
+    const rng = RNG(seed); const heat = p.heat ?? 0;
+    const toBase = 29 + rng() * 6 + heat, amp = 5 + rng() * 3;
+    const jobs = []; const nJobs = 1 + rng.int(2);
+    for (let j = 0; j < nJobs; j++) { const start = 48 + rng.int(72); const dur = 6 + rng.int(13); jobs.push({ start, end: start + dur, mw: +(0.8 + rng() * 1.4).toFixed(1) }); }
+    const to = [], load = [];
+    for (let t = 0; t < STEPS; t++) {
+      const hr = t * DT; to.push(toBase + amp * Math.sin(((hr - 9) / 24) * 2 * Math.PI));
+      let L = 1.2 + 0.8 * Math.max(0, Math.sin(((hr - 8) / 20) * Math.PI)) + rng.normal(0, 0.05);
+      jobs.forEach((j) => { if (t >= j.start && t < j.end) L += j.mw; });
+      load.push(Math.max(0.5, L));
+    }
+    return { seed, heat, to, load, jobs, noise: Array.from({ length: STEPS }, () => rng.normal(0, 0.3)), t0: 22 + rng() * 2 };
+  }
+  /* run one agent over one day. agent(percept) -> cooling level 0..10. The log keeps running totals so a replay can show the bill growing */
+  function run(agent, d) {
+    if (agent.reset) agent.reset();
+    let T = d.t0, ueff = 2, uprev = 2; const log = { T: [], Tm: [], u: [], ueff: [], cum: [], nv: [], cost: 0, energy: 0, viol: 0, peak: -Infinity };
+    for (let t = 0; t < STEPS; t++) {
+      const Tm = T + d.noise[t];
+      const per = { t, T: Tm, load: d.load[t], to: d.to[t], price: price(t), jobs: d.jobs, uprev,
+        schedule: (hz) => { let m = d.load[t]; for (let s = t; s < Math.min(STEPS, t + hz); s++) { let L = d.load[t]; d.jobs.forEach((j) => { if (s >= j.start && s < j.end && !(t >= j.start && t < j.end)) L += j.mw; if (t >= j.start && t < j.end && s >= j.end) L -= j.mw; }); m = Math.max(m, L); } return m; } };
+      const u = clamp(Math.round(agent(per)), 0, 10);
+      ueff += TRUE.lag * (u - ueff);                                   // the cooling units ramp, they do not jump
+      T += (DT / TRUE.cth) * (d.load[t] + TRUE.kenv * (d.to[t] - T) - TRUE.gain * ueff);
+      const e = coolPower(ueff, d.to[t]) * DT * 1000;                 // kWh in this step
+      log.energy += e; log.cost += e * price(t); if (T > LIMIT) { log.viol++; log.cost += PENALTY; }
+      log.T.push(T); log.Tm.push(Tm); log.u.push(u); log.ueff.push(ueff); log.cum.push(log.cost); log.nv.push(log.viol); log.peak = Math.max(log.peak, T); uprev = u;
+    }
+    return log;
+  }
+
+  const agents = {
+    reflex: (tset, uhigh, ulow) => (per) => (per.T > tset ? uhigh : ulow),
+    model: (target, K, horizon) => {
+      let Tf = null, Tprev = null, u = 2;
+      const f = (per) => {
+        Tf = Tf === null ? per.T : 0.5 * Tf + 0.5 * per.T;                          // sensor model: filter the noisy reading
+        const slope = Tprev === null ? 0 : Tf - Tprev; Tprev = Tf;
+        const Tpred = Tf + slope * horizon;                                         // where we will be if nothing changes
+        u = clamp(Math.round(u + K * (Tpred - target)), 0, 10);
+        f.state = { Tf, Tpred }; return u;
+      };
+      f.reset = () => { Tf = null; Tprev = null; u = 2; }; return f;
+    },
+    goal: (target, lookahead, K, model = TRUE) => {
+      let Tf = null;
+      const f = (per) => {
+        Tf = Tf === null ? per.T : 0.5 * Tf + 0.5 * per.T;
+        const Lmax = per.schedule(lookahead);                                       // the goal: never exceed the limit, even when the batch job starts
+        const Qneeded = Lmax + model.kenv * (per.to - target);                      // steady-state cooling that holds the target under that load
+        const uff = Qneeded / model.gain;                                           // feed-forward from the model
+        const u = clamp(Math.round(uff + K * (Tf - target)), 0, 10); f.state = { Lmax, uff }; return u;
+      };
+      f.reset = () => { Tf = null; }; return f;
+    },
+    utility: (w, model = TRUE) => {
+      let Tf = null, ueff = 2, uprev = 2;
+      const H = w.horizon, lag = model.lag, gk = DT / model.cth, kenv = model.kenv, gain = model.gain, wv = w.wviol * PENALTY, pr = new Array(H);
+      const f = (per) => {
+        Tf = Tf === null ? per.T : 0.5 * Tf + 0.5 * per.T;
+        ueff += lag * (uprev - ueff);
+        const Lh = per.schedule(H), to = per.to, cp = cop(to); let best = 0, bestU = -Infinity;
+        for (let i = 0; i < H; i++) pr[i] = price(per.t + i);
+        for (let u = 0; u <= 10; u++) {
+          let TT = Tf, ue = ueff, cost = 0;
+          for (let i = 0; i < H; i++) {
+            ue += lag * (u - ue); TT += gk * (Lh + kenv * (to - TT) - gain * ue);
+            cost += (0.25 * pow(ue / 10, 3) + (TRUE.gain * ue) / cp) * DT * 1000 * pr[i];   // electricity at the price of that step
+            cost += wv / (1 + exp(-(TT - LIMIT + 0.5) / 0.3));                               // expected penalty: soft probability of a violation
+          }
+          cost += w.wwear * 20 * abs(u - uprev);
+          const U = -cost; if (U > bestU) { bestU = U; best = u; }
+        }
+        uprev = best; f.state = { Tf }; return best;
+      };
+      f.reset = () => { Tf = null; ueff = 2; uprev = 2; }; return f;
+    },
+    /* the omniscient reference. It is given the day itself: the true temperature, the exact future load and weather. It plans level a for
+       `split` steps then level b up to H steps ahead, scores each plan with the real bill and the real penalty, and keeps an exact copy of the hall */
+    omniscient: (d, H, split) => {
+      const g = DT / TRUE.cth, kw = DT * 1000, lag = TRUE.lag, kenv = TRUE.kenv, gain = TRUE.gain, load = d.load, out = d.to;
+      const fan = PRICE.map((pr) => 0.25 * kw * pr), chill = out.map((to, s) => (gain / cop(to)) * kw * PRICE[s]);   // SAR per unit of x³ and of level, per step
+      const near = (c) => { const o = [c]; for (let k = 1; k <= 10; k++) { if (c - k >= 0) o.push(c - k); if (c + k <= 10) o.push(c + k); } return o; };   // try the last choice first: tighter bound, more pruning
+      const ORDER = Array.from({ length: 11 }, (_, c) => near(c));
+      let T = d.t0, ueff = 2, prev = 2;
+      const f = (per) => {
+        const t = per.t, end = t + H < STEPS ? t + H : STEPS, mid = t + split < end ? t + split : end, oa = ORDER[prev]; let best = prev, bestC = Infinity;
+        for (let ia = 0; ia < 11; ia++) {
+          const a = oa[ia]; let TT = T, ue = ueff, c = 0;
+          for (let s = t; s < mid && c < bestC; s++) { ue += lag * (a - ue); TT += g * (load[s] + kenv * (out[s] - TT) - gain * ue); const x = ue / 10; c += fan[s] * x * x * x + chill[s] * ue; if (TT > LIMIT) c += PENALTY; }
+          if (c >= bestC) continue;
+          const ob = ORDER[a];
+          for (let ib = 0; ib < 11; ib++) {
+            const b = ob[ib]; let T2 = TT, u2 = ue, c2 = c;
+            for (let s = mid; s < end && c2 < bestC; s++) { u2 += lag * (b - u2); T2 += g * (load[s] + kenv * (out[s] - T2) - gain * u2); const x = u2 / 10; c2 += fan[s] * x * x * x + chill[s] * u2; if (T2 > LIMIT) c2 += PENALTY; }
+            if (c2 < bestC) { bestC = c2; best = a; }
+          }
+        }
+        prev = best;
+        ueff += lag * (best - ueff); T += g * (load[t] + kenv * (out[t] - T) - gain * ueff);   // same update as the hall
+        return best;
+      };
+      f.reset = () => { T = d.t0; ueff = 2; prev = 2; }; return f;
+    },
+    constant: (u) => () => u,
+    replay: (us) => (per) => us[per.t],
+  };
+
+  /* reference cost of a day: the better of two omniscient planners. Nobody without perfect foresight can expect to match it */
+  const PLANNERS = [[12, 3], [18, 6]];   // [horizon, steps before the plan may switch level]
+  const refCache = {};
+  function refLog(d) {
+    const k = d.seed + ":" + d.heat;
+    if (!refCache[k]) refCache[k] = PLANNERS.map(([H, s]) => run(agents.omniscient(d, H, s), d)).reduce((a, b) => (b.cost < a.cost ? b : a));
+    return refCache[k];
+  }
+  const refCost = (d) => refLog(d).cost;
+  /* the plant manager's budget for a day: the best possible cost of that day (the omniscient agent) + 10%, rounded up to the next 10 SAR */
+  const budgetOf = (d) => Math.ceil((refCost(d) * 1.1) / 10) * 10;
+  const signed = (v) => (v < 0 ? "−" : "+") + fmt(Math.abs(v), 0);
+  const vsBudget = (left) => (left >= 0 ? `under budget by ${fmt(left, 0)} SAR` : `over budget by ${fmt(-left, 0)} SAR`);
+  /* money left over several days = Σ (budget − cost); it can be negative. A day is within budget when cost ≤ budget */
+  function scoreDays(make, days) {
+    const rs = days.map((d) => { const r = run(make(d), d), budget = budgetOf(d); return { ...r, budget, left: budget - r.cost }; });
+    const avg = (k) => mean(rs.map((r) => r[k]));
+    return { cost: avg("cost"), energy: avg("energy"), viol: avg("viol"), budget: avg("budget"), left: rs.reduce((s, r) => s + r.left, 0), within: rs.filter((r) => r.left >= 0).length, peak: Math.max(...rs.map((r) => r.peak)), worst: Math.min(...rs.map((r) => r.left)), runs: rs };
+  }
+  const evalMany = (make, seeds, p = {}) => scoreDays(make, seeds.map((s) => day(s, p)));
+  const PRACTICE = Array.from({ length: 10 }, (_, i) => 101 + i);
+
+  /* learning: estimate the thermal constants from logged days by least squares on the transition equation */
+  const learnCache = {};
+  function learnModel(nDays) {
+    if (nDays === 0) return { ...GUESS };
+    if (learnCache[nDays]) return learnCache[nDays];
+    const rows = [];
+    for (let i = 0; i < nDays; i++) { const d = day(500 + i); const log = run(agents.reflex(24, 8, 2), d); for (let t = 1; t < STEPS; t += 3) { const T = log.T[t - 1]; rows.push({ dT: log.T[t] - T, load: d.load[t], to: d.to[t], T, ue: log.ueff[t] }); } }
+    const n = rows.length, col = (k) => Float64Array.from(rows, (r) => r[k]), dT = col("dT"), L = col("load"), dTo = Float64Array.from(rows, (r) => r.to - r.T), ue = col("ue");
+    let best = null, bestErr = Infinity;
+    for (let cth = 0.2; cth <= 1.2; cth += 0.05) { const a = DT / cth; for (let kenv = 0.02; kenv <= 0.12; kenv += 0.01) for (let gain = 0.3; gain <= 0.7; gain += 0.02) {
+      let err = 0; for (let i = 0; i < n; i++) { const pred = a * (L[i] + kenv * dTo[i] - gain * ue[i]); err += (pred - dT[i]) ** 2; if (err > bestErr) break; }
+      if (err < bestErr) { bestErr = err; best = { cth: +cth.toFixed(2), kenv: +kenv.toFixed(2), gain: +gain.toFixed(2), lag: TRUE.lag }; }
+    } }
+    // noisy readings in few days blur the fit: shrink toward the guess when data is scarce
+    const wgt = Math.min(1, nDays / 4);
+    best = { cth: +(wgt * best.cth + (1 - wgt) * GUESS.cth).toFixed(2), kenv: +(wgt * best.kenv + (1 - wgt) * GUESS.kenv).toFixed(2), gain: +(wgt * best.gain + (1 - wgt) * GUESS.gain).toFixed(2), lag: TRUE.lag };
+    learnCache[nDays] = best; return best;
+  }
+
+  /* tournament: the official days live on the server; the last two days of any seed list are heat waves (+5 °C) */
+  const tourAgent = (p) => p.agent === "reflex" ? agents.reflex(p.tset, p.uhigh, p.ulow) : p.agent === "model" ? agents.model(p.target, p.K, p.horizon) : p.agent === "goal" ? agents.goal(p.target, p.lookahead, p.K) : p.agent === "utility" ? agents.utility({ wviol: p.wviol, horizon: p.H, wwear: p.wwear }) : agents.utility({ wviol: p.wviol, horizon: p.H, wwear: p.wwear }, learnModel(p.days));
+  const TOUR = Lab.tournamentSpec({
+    labId: "L1",
+    intro: `<h3>The cooling league</h3><p>You run the hall for <b>10 days you have not seen</b>. Each morning the plant manager sets the day's cooling budget: the best possible cost of that day plus 10%. Your score is the <b>money left in the budget</b> over the 10 days (budget − your cost, added up). Above zero: you beat the manager's budget overall. Every 10 minutes above 27 °C adds 1,000 SAR to your cost, so one bad afternoon can wipe out a week of savings. The last two days are heat waves (+5 °C).</p>`,
+    howTo: [
+      "<b>Pick an agent</b> on the left. Only that agent's settings appear under it, each with a one-line reminder of what it does (you met them in steps 4 to 8).",
+      "<b>Tune</b> its settings and press <b>Practice run</b>. You get your money left on 10 practice days, with a bar per day: green under budget, red over. The two heat-wave days are marked.",
+      "<b>Compare</b>: every practice run is added to the table under the result. Look for a run with no big red day, not just the highest total: the hidden days are different.",
+      "Press <b>Use</b> on your best run to put it back on the controls, enter your name and team, and press <b>Official run</b>. You get one; the server scores it on the hidden days.",
+    ],
+    unit: "SAR left in the budget",
+    grade: (v) => (v >= 0 ? "good" : "bad"),
+    barsTitle: "Money left on each practice day (budget − cost)",
+    barsUnit: "SAR",
+    compare: ["Days within budget", "Worst day"],
+    params: [
+      { key: "agent", label: "Agent", type: "select", string: true, cards: true, default: "utility", options: [
+        { value: "reflex", label: "Simple reflex (step 4)", desc: "A thermostat: above T_set it cools at HIGH, otherwise at LOW. No memory, no planning." },
+        { value: "model", label: "Model-based (step 5)", desc: "Predicts where the temperature is heading and corrects toward a target." },
+        { value: "goal", label: "Goal-based (step 6)", desc: "Reads the job schedule ahead and cools in advance for the next batch job." },
+        { value: "utility", label: "Utility-based (step 7)", desc: "Tries every cooling level on its model and picks the cheapest one that is still safe." },
+        { value: "learning", label: "Learning (step 8)", desc: "The utility agent, but it first learns the hall's physics from logged days." },
+      ] },
+      { key: "tset", label: "T_set (°C)", min: 20, max: 28, step: 0.5, default: 24, fmt: (v) => v.toFixed(1), help: "Above this reading it cools at HIGH. Lower is safer and costs more.", showIf: (p) => p.agent === "reflex" },
+      { key: "uhigh", label: "HIGH level", min: 0, max: 10, step: 1, default: 8, help: "Cooling level when the reading is above T_set.", showIf: (p) => p.agent === "reflex" },
+      { key: "ulow", label: "LOW level", min: 0, max: 10, step: 1, default: 2, help: "Cooling level the rest of the time.", showIf: (p) => p.agent === "reflex" },
+      { key: "target", label: "Target (°C)", min: 20, max: 26.5, step: 0.5, default: 24.5, fmt: (v) => v.toFixed(1), help: "The temperature it aims for. Leave a margin under 27 °C.", showIf: (p) => p.agent === "model" || p.agent === "goal" },
+      { key: "K", label: "Gain K", min: 0.2, max: 4, step: 0.1, default: 1.5, fmt: (v) => v.toFixed(1), help: "How hard it corrects per degree of error. Too high and it swings.", showIf: (p) => p.agent === "model" || p.agent === "goal" },
+      { key: "horizon", label: "Prediction horizon (steps of 10 min)", min: 0, max: 12, step: 1, default: 3, help: "How far ahead it extrapolates the temperature trend.", showIf: (p) => p.agent === "model" },
+      { key: "lookahead", label: "Lookahead (steps of 10 min)", min: 0, max: 12, step: 1, default: 4, help: "How far ahead it reads the job schedule. The cooling needs about an hour (6 steps).", showIf: (p) => p.agent === "goal" },
+      { key: "H", label: "Horizon H (steps of 10 min)", min: 1, max: 12, step: 1, default: 6, help: "How far ahead it simulates each cooling level. Too short and it sees danger too late.", showIf: (p) => p.agent === "utility" || p.agent === "learning" },
+      { key: "wviol", label: "w_viol (fear of violations)", min: 0, max: 3, step: 0.1, default: 1.0, fmt: (v) => v.toFixed(1), help: "1 = a violation weighs its real cost. Higher is more cautious.", showIf: (p) => p.agent === "utility" || p.agent === "learning" },
+      { key: "wwear", label: "w_wear", min: 0, max: 3, step: 0.1, default: 0, fmt: (v) => v.toFixed(1), help: "Extra cost for changing the level often. Not part of the bill.", showIf: (p) => p.agent === "utility" || p.agent === "learning" },
+      { key: "days", label: "Training days logged", min: 0, max: 10, step: 1, default: 0, help: "Days of data it learns from. 0 = the designer's wrong guess.", showIf: (p) => p.agent === "learning" },
+    ],
+    practiceSeeds: PRACTICE,
+    run(p, seeds) {
+      const heatDays = new Set(seeds.slice(-2));
+      const ev = scoreDays(() => tourAgent(p), seeds.map((s) => day(s, { heat: heatDays.has(s) ? 5 : 0 })));
+      return {
+        points: ev.left,
+        details: [{ k: "Days within budget", v: `${ev.within} of ${ev.runs.length}`, cls: ev.within === ev.runs.length ? "good" : "" }, { k: "Worst day", v: ev.worst >= 0 ? `${fmt(ev.worst, 0)} SAR under` : `${fmt(-ev.worst, 0)} SAR over`, cls: ev.worst < 0 ? "bad" : "" }, { k: "Avg budget (SAR/day)", v: fmt(ev.budget, 0) }, { k: "Avg cost (SAR/day)", v: fmt(ev.cost, 0) }, { k: "Avg minutes above 27 °C", v: fmt(ev.viol * 10, 0), cls: ev.viol > 0.5 ? "bad" : "" }, { k: "Energy (MWh/day)", v: fmt(ev.energy / 1000, 2) }],
+        bars: ev.runs.map((r, i) => ({ label: `Day ${i + 1}${heatDays.has(seeds[i]) ? " (heat)" : ""}`, value: r.left, mark: heatDays.has(seeds[i]) })),
+        summary: "The last two days are the heat waves (+5 °C).",
+      };
+    },
+  });
+
+  /* drawing: separate panels with their own axes, an HTML legend and a hover readout */
+  const HINT = "Move the mouse over the chart to read the values at any time of day.";
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+  const hhmm = (t) => { const hr = Math.floor(t / 6), mn = (t % 6) * 10; return `${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`; };
+  const res = (log) => `${log.viol * 10} minutes above 27 °C, cost ${fmt(log.cost, 0)} SAR`;
+  const turns = (u) => { let n = 0, last = 0; for (let i = 1; i < u.length; i++) { const s = Math.sign(u[i] - u[i - 1]); if (s && last && s !== last) n++; if (s) last = s; } return n; };
+  /* colors for every lab 1 canvas, chosen per theme so lines, bands and labels keep their contrast on a dark panel */
+  const isDark = () => { const a = document.documentElement.getAttribute("data-theme"); return a ? a === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+  function palette() {
+    const dark = isDark();
+    return {
+      dark, ink: css("--ink"), muted: css("--muted"), lag: css("--lagoon"), coral: css("--coral"), panel: css("--panel"),
+      grid: dark ? "rgba(255,255,255,.10)" : "#e4e9f1", label: dark ? "#b9c4d8" : "#5d6a7e",
+      temp: dark ? "#f4f7fc" : "#1d2735", dots: dark ? "rgba(196,206,226,.55)" : "rgba(100,113,134,.5)",
+      limit: dark ? "#ff8f86" : "#d9574d", hotZone: dark ? "rgba(255,120,110,.07)" : "rgba(238,138,132,.09)", viol: dark ? "rgba(255,105,95,.34)" : "rgba(232,96,88,.28)",
+      job: dark ? "rgba(178,160,255,.17)" : "rgba(143,127,232,.13)", jobBar: dark ? "#b7a8ff" : "#8572e6", load: dark ? "#c6baff" : "#7360dc", out: dark ? "#ffc66f" : "#d98a1c",
+      cool: dark ? "#93abff" : "#3f5fd8", coolFill: dark ? "rgba(147,171,255,.32)" : "rgba(91,124,250,.22)", cmd: dark ? "#f4f7fc" : "#243041", pred: dark ? "#8fdcff" : "#1f86c9",
+      tariff: dark ? ["#5fc9a6", "#ffc66f", "#ff8f86"] : ["#3fae8a", "#eaa63d", "#e66b62"], cursor: dark ? "#ff8f86" : "#d9574d",
+    };
+  }
+  const tariffColor = (P, pr) => (pr > 0.4 ? P.tariff[2] : pr > 0.2 ? P.tariff[1] : P.tariff[0]);
+  function drawDay(cv, d, log, opts = {}) {
+    const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+    const P = palette();
+    const pad = { l: 54, r: 16 }; const X = (t) => pad.l + (t / (STEPS - 1)) * (W - pad.l - pad.r); const bw = (W - pad.l - pad.r) / (STEPS - 1);
+    const n = opts.upto == null ? STEPS - 1 : opts.upto;            // the agent's log is drawn up to this step (replay)
+    const trace = (arr, Y, last = n) => { ctx.beginPath(); for (let t = 0; t <= last; t++) (t ? ctx.lineTo(X(t), Y(arr[t])) : ctx.moveTo(X(t), Y(arr[t]))); };
+    ctx.font = "12px Public Sans, system-ui"; ctx.textBaseline = "middle";
+    const panel = (y0, y1, lo, hi, ticks, unit) => {
+      const Y = (v) => y1 - ((clamp(v, lo, hi) - lo) / (hi - lo)) * (y1 - y0);
+      ctx.strokeStyle = P.grid; ctx.lineWidth = 1;
+      ticks.forEach((v) => { ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(W - pad.r, Y(v)); ctx.stroke(); ctx.fillStyle = P.label; ctx.textAlign = "right"; ctx.fillText(v + unit, pad.l - 6, Y(v)); });
+      ctx.textAlign = "left"; return Y;
+    };
+    const jobBands = (y0, y1) => d.jobs.forEach((j) => { ctx.fillStyle = P.job; ctx.fillRect(X(j.start), y0, X(j.end) - X(j.start), y1 - y0); });
+    const title = (s, y) => { ctx.fillStyle = P.label; ctx.font = "600 12px Public Sans, system-ui"; ctx.fillText(s, pad.l + 6, y); ctx.font = "12px Public Sans, system-ui"; };
+    // schedule track
+    { const y0 = 8, y1 = 30; ctx.fillStyle = P.label; ctx.fillText("jobs", 8, (y0 + y1) / 2); d.jobs.forEach((j, i) => { ctx.fillStyle = P.jobBar; ctx.fillRect(X(j.start), y0 + (i % 2) * 11, X(j.end) - X(j.start), 10); ctx.fillStyle = P.ink; ctx.fillText(`+${j.mw} MW`, X(j.end) + 4, y0 + (i % 2) * 11 + 5); }); }
+    // temperature
+    { const y0 = 44, y1 = 216; jobBands(y0, y1); const Y = panel(y0, y1, 18, 32, [18, 22, 26, 30], "°");
+      ctx.fillStyle = P.hotZone; ctx.fillRect(pad.l, y0, W - pad.l - pad.r, Y(LIMIT) - y0);
+      ctx.strokeStyle = P.limit; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(pad.l, Y(LIMIT)); ctx.lineTo(W - pad.r, Y(LIMIT)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = P.limit; ctx.textAlign = "right"; ctx.fillText("27 °C limit", W - pad.r - 4, Y(LIMIT) - 8); ctx.textAlign = "left";
+      if (log) {
+        for (let t = 0; t <= n; t++) if (log.T[t] > LIMIT) { ctx.fillStyle = P.viol; ctx.fillRect(X(t) - bw / 2, y0, bw + 1, y1 - y0); }
+        ctx.fillStyle = P.dots; for (let t = 0; t <= n; t++) { ctx.beginPath(); ctx.arc(X(t), Y(log.Tm[t]), 1.7, 0, 7); ctx.fill(); }
+        if (opts.extra) { ctx.strokeStyle = P.pred; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.6; trace(opts.extra, Y); ctx.stroke(); ctx.setLineDash([]); }
+        ctx.strokeStyle = P.temp; ctx.lineWidth = 2.3; trace(log.T, Y); ctx.stroke();
+        if (opts.cursor != null) { ctx.fillStyle = P.cursor; ctx.beginPath(); ctx.arc(X(opts.cursor), Y(log.T[opts.cursor]), 5, 0, 7); ctx.fill(); }
+      }
+      title("inlet temperature", y0 + 10); }
+    // IT load
+    { const y0 = 246, y1 = 316; jobBands(y0, y1); const Y = panel(y0, y1, 0, 5, [0, 2.5, 5], " MW");
+      ctx.strokeStyle = P.load; ctx.lineWidth = 2; trace(d.load, Y, STEPS - 1); ctx.stroke(); title("IT load", y0 + 10); }
+    // outside temperature
+    { const y0 = 346, y1 = 416; const Y = panel(y0, y1, 20, 50, [20, 35, 50], "°");
+      ctx.strokeStyle = P.out; ctx.lineWidth = 2; trace(d.to, Y, STEPS - 1); ctx.stroke(); title("outside temperature", y0 + 10); }
+    // cooling level
+    { const y0 = 446, y1 = 552; jobBands(y0, y1); const Y = panel(y0, y1, 0, 10, [0, 5, 10], "");
+      if (log) {
+        ctx.fillStyle = P.coolFill; ctx.beginPath(); ctx.moveTo(X(0), Y(0)); for (let t = 0; t <= n; t++) ctx.lineTo(X(t), Y(log.ueff[t])); ctx.lineTo(X(n), Y(0)); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = P.cool; ctx.lineWidth = 2; trace(log.ueff, Y); ctx.stroke();
+        ctx.strokeStyle = P.cmd; ctx.lineWidth = 1.1; ctx.beginPath(); for (let t = 0; t <= n; t++) { const v = log.u[t]; if (t === 0) ctx.moveTo(X(t), Y(v)); else { ctx.lineTo(X(t), Y(log.u[t - 1])); ctx.lineTo(X(t), Y(v)); } } ctx.stroke();
+        if (opts.cursor != null) { ctx.fillStyle = P.cursor; ctx.beginPath(); ctx.arc(X(opts.cursor), Y(log.ueff[opts.cursor]), 4.5, 0, 7); ctx.fill(); }
+      }
+      title("cooling level (0 to 10)", y0 + 10); }
+    // price ribbon and time axis
+    { const y0 = 568, y1 = 582; for (let t = 0; t < STEPS; t++) { ctx.fillStyle = tariffColor(P, PRICE[t]); ctx.fillRect(X(t) - bw / 2, y0, bw + 1, y1 - y0); }
+      ctx.fillStyle = P.label; ctx.textAlign = "right"; ctx.fillText("tariff", pad.l - 6, (y0 + y1) / 2); ctx.textAlign = "center";
+      for (let hr = 0; hr <= 24; hr += 3) { const t = Math.min(STEPS - 1, hr * 6); ctx.fillText(`${hr}:00`, X(t), 598); ctx.strokeStyle = P.grid; ctx.beginPath(); ctx.moveTo(X(t), y1); ctx.lineTo(X(t), y1 + 4); ctx.stroke(); }
+      ctx.textAlign = "left"; }
+    if (opts.cursor != null) {
+      const x = X(opts.cursor), lbl = hhmm(opts.cursor);
+      ctx.strokeStyle = P.cursor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, 50); ctx.lineTo(x, 582); ctx.stroke();
+      ctx.font = "bold 12px Public Sans, system-ui"; const w = ctx.measureText(lbl).width + 10, lx = clamp(x - w / 2, pad.l, W - pad.r - w);
+      ctx.fillStyle = P.cursor; ctx.fillRect(lx, 34, w, 16); ctx.fillStyle = P.dark ? "#1a1f2a" : "#fff"; ctx.fillText(lbl, lx + 5, 42);
+    }
+    cv._geom = { pad, X };
+  }
+  /* legend whose swatches follow the theme palette */
+  function themedLegend(items) {
+    const el = h("div", { class: "legend" });
+    const paint = () => { const P = palette(); el.innerHTML = ""; items.forEach(([pick, text, style = ""]) => el.append(h("span", {}, h("i", { style: `background:${typeof pick === "function" ? pick(P) : pick};${style}` }), text))); };
+    paint(); onTheme(paint); return el;
+  }
+  const dayLegend = () => themedLegend([[(P) => P.temp, "true inlet temperature", "height:3px;vertical-align:3px"], [(P) => P.dots, "sensor readings (noisy)", "border-radius:50%"], [(P) => P.viol, "above the 27 °C limit"], [(P) => P.jobBar, "scheduled batch job"], [(P) => P.cool, "cooling level reached"], [(P) => P.cmd, "level commanded", "height:2px;vertical-align:3px"], [(P) => P.tariff[0], "0.18 SAR/kWh night"], [(P) => P.tariff[1], "0.32 day"], [(P) => P.tariff[2], "0.48 peak"]]);
+  function attachHover(cv, readout, getData, onT) {
+    cv.addEventListener("mousemove", (e) => {
+      const g = cv._geom; if (!g) return; const r = cv.getBoundingClientRect(); const x = ((e.clientX - r.left) / r.width) * cv.width;
+      const t = clamp(Math.round(((x - g.pad.l) / (cv.width - g.pad.l - g.pad.r)) * (STEPS - 1)), 0, STEPS - 1);
+      const { d, log } = getData(); if (!log) return;
+      readout.textContent = `${hhmm(t)}  inlet ${log.T[t].toFixed(1)} °C (sensor ${log.Tm[t].toFixed(1)})  load ${d.load[t].toFixed(2)} MW  outside ${d.to[t].toFixed(1)} °C  commanded ${log.u[t]}  cooling at ${log.ueff[t].toFixed(1)}  price ${price(t).toFixed(2)} SAR/kWh`;
+      if (onT) onT(t, d);
+    });
+    cv.addEventListener("mouseleave", () => (readout.textContent = HINT));
+  }
+  /* redraw a canvas when the reader switches between the light and the dark theme */
+  const onTheme = (fn) => new MutationObserver(fn).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const BUDGET_NOTE = "Budget of a day = the best possible cost of that day (what the omniscient agent, which knows the future, would pay) + 10%, rounded up to the next 10 SAR. Money left = budget − cost, added over the days; it goes negative when you spend more than the budget.";
+  const CHART_NOTE = "How to read the chart: in the top panel the bold line is the true inlet temperature and the dashed red line is the 27 °C limit. In the bottom panel the thin steps are the cooling level the agent commands, and the blue area is the level the cooling units have actually reached; it follows about an hour behind.";
+
+  /* cost receipt: the cost of a day added up one 10-minute step at a time (the same sum as run()), checked against the day's budget.
+     It follows a dayView's play cursor and the mouse; when the whole day is shown it prints the full bill. Pass rc.hooks to dayView, then rc.attach(view) */
+  const TARIFF = [[0.18, "night tariff, 22:00 to 08:00"], [0.32, "day tariff"], [0.48, "peak tariff, 13:00 to 17:00"]];
+  const tariffName = (t) => TARIFF.find(([pr]) => pr === price(t))[1];
+  function costReceipt(onHover) {
+    const el = h("div", { style: "border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin:.6rem 0;background:var(--panel);font-variant-numeric:tabular-nums" });
+    const row = (a, b, style = "") => `<tr style="${style}"><td>${a}</td><td style="text-align:right">${b}</td></tr>`;
+    const kwhAt = (dd, L, t) => coolPower(L.ueff[t], dd.to[t]) * DT * 1000;
+    const verdict = (left) => `<b style="color:${left >= 0 ? "var(--mint-2)" : "var(--coral)"}">${left >= 0 ? "Under" : "Over"} budget by ${fmt(Math.abs(left), 0)} SAR</b>`;
+    let hoverT = null, view = null;
+    function showStep(t, dd, L) {
+      const mw = coolPower(L.ueff[t], dd.to[t]), kwh = mw * DT * 1000, sar = kwh * price(t), hot = L.T[t] > LIMIT, budget = budgetOf(dd);
+      let elec = 0; for (let s = 0; s <= t; s++) elec += kwhAt(dd, L, s) * price(s);
+      const pen = L.nv[t] * PENALTY, total = elec + pen;
+      el.innerHTML = `<b>Cost receipt: the 10 minutes from ${hhmm(t)} to ${hhmm(t + 1)}</b>
+        <table style="width:100%;margin:.3rem 0">${row(`Cooling power at level ${L.ueff[t].toFixed(1)} (outside ${dd.to[t].toFixed(1)} °C)`, `${fmt(mw, 2)} MW`)}
+        ${row("× 10 minutes (1/6 hour) = energy", `${fmt(kwh, 0)} kWh`)}
+        ${row(`× ${price(t).toFixed(2)} SAR/kWh (${tariffName(t)}) = electricity`, `${fmt(sar, 1)} SAR`)}
+        ${row(`True inlet ${L.T[t].toFixed(1)} °C: ${hot ? "above 27 °C, penalty" : "not above 27 °C, no penalty"}`, hot ? "+1,000 SAR" : "0 SAR", hot ? "color:var(--coral)" : "")}</table>
+        <div>So far today (00:00 to ${hhmm(t + 1)}): electricity <b>${fmt(elec, 0)} SAR</b> + penalties ${L.nv[t]} × 1,000 = <b>${fmt(pen, 0)} SAR</b>, total <b>${fmt(total, 0)} SAR</b></div>
+        <div>Budget for the whole day: <b>${fmt(budget, 0)} SAR</b>; ${total <= budget ? `${fmt(budget - total, 0)} SAR of it still unspent` : `<b style="color:var(--coral)">already over by ${fmt(total - budget, 0)} SAR</b>`}</div>`;
+    }
+    function showDay(dd, L) {
+      const bands = TARIFF.map(([pr, nm]) => { let kwh = 0; for (let t = 0; t < STEPS; t++) if (price(t) === pr) kwh += kwhAt(dd, L, t); return { pr, nm, kwh }; });
+      const elec = bands.reduce((a, b) => a + b.kwh * b.pr, 0), budget = budgetOf(dd), best = refCost(dd);
+      el.innerHTML = `<b>Cost receipt: the whole day</b>
+        <table style="width:100%;margin:.3rem 0">${bands.map((b) => row(`${fmt(b.kwh, 0)} kWh × ${b.pr.toFixed(2)} SAR/kWh (${b.nm})`, `${fmt(b.kwh * b.pr, 0)} SAR`)).join("")}
+        ${row("Electricity bill", `<b>${fmt(elec, 0)} SAR</b>`)}
+        ${row(`Penalties: ${L.viol} ten-minute steps above 27 °C × 1,000 SAR`, `${fmt(L.viol * PENALTY, 0)} SAR`, L.viol ? "color:var(--coral)" : "")}
+        ${row("<b>Cost of the day</b>", `<b>${fmt(L.cost, 0)} SAR</b>`)}
+        ${row(`Budget of the day (best possible ${fmt(best, 0)} SAR + 10%, rounded up)`, `<b>${fmt(budget, 0)} SAR</b>`)}</table>
+        <div>${verdict(budget - L.cost)}</div>
+        <div class="note">Press ▶ Play the day to watch the sum grow, or move the mouse over the chart to see one 10-minute step.</div>`;
+    }
+    const hooks = {
+      onCursor: (c, dd, L) => { if (!L) { el.innerHTML = ""; return; } if (c != null) showStep(c, dd, L); else if (hoverT == null) showDay(dd, L); },
+      onHover: (t, dd) => { hoverT = t; const cur = view && view.get(); if (cur && cur.log) showStep(t, cur.d, cur.log); if (onHover) onHover(t, dd); },
+    };
+    const attach = (v) => { view = v; v.el.querySelector("canvas").addEventListener("mouseleave", () => { hoverT = null; const cur = v.get(); if (cur && cur.log) showDay(cur.d, cur.log); }); return v; };
+    return { el, hooks, attach };
+  }
+
+  /* dayView: the day chart as a live object. set() morphs from the old day to the new one; play() replays the 144 decisions with a moving time cursor */
+  function dayView(label = "▶ Play the day", hooks = {}) {
+    const cv = canvas(760, 610), readout = h("div", { class: "note" }, HINT), live = h("span", { class: "note" }, "Press play to watch the agent decide, one 10-minute step at a time.");
+    const btn = h("button", { class: "ghost" }, label);
+    let tgt = null, disp = null, from = null, mt0 = 0, morphing = false, raf = 0, upto = null, tok = 0, playing = false;
+    const KEYS = ["T", "ueff", "extra", "load", "to"];
+    const pick = (d, log, extra) => ({ T: log ? log.T : null, ueff: log ? log.ueff : null, extra: extra || null, load: d.load, to: d.to });
+    function draw() {
+      if (!tgt) return;
+      const c = upto == null || !tgt.log ? null : Math.min(STEPS - 1, Math.floor(upto)), L = tgt.log;
+      drawDay(cv, { jobs: tgt.d.jobs, load: disp.load, to: disp.to }, L ? { T: disp.T, Tm: L.Tm, u: L.u, ueff: disp.ueff } : null, { extra: disp.extra, upto: c == null ? STEPS - 1 : c, cursor: c });
+      if (c != null) live.innerHTML = `<b>${hhmm(c)}</b> · inlet ${L.T[c].toFixed(1)} °C (sensor ${L.Tm[c].toFixed(1)}) · commanded ${L.u[c]} · cooling at ${L.ueff[c].toFixed(1)} · cost so far ${fmt(L.cum[c], 0)} SAR · minutes above 27 °C: ${L.nv[c] * 10}`;
+      if (hooks.onCursor) hooks.onCursor(c, tgt.d, L);   // c is null when the whole day is shown
+    }
+    function frame(now) {
+      raf = 0;
+      if (morphing) {
+        const k = ease(clamp((now - mt0) / 380, 0, 1)), t = pick(tgt.d, tgt.log, tgt.extra);
+        KEYS.forEach((key) => { const a = from[key], b = t[key]; disp[key] = a && b && a.length === b.length ? b.map((v, i) => a[i] + (v - a[i]) * k) : b; });
+        if (k >= 1) morphing = false;
+      }
+      draw(); if (morphing) raf = requestAnimationFrame(frame);
+    }
+    function set(d, log, extra) {
+      tgt = { d, log, extra };
+      if (!disp) { disp = pick(d, log, extra); draw(); return; }
+      from = { ...disp }; mt0 = performance.now(); morphing = true;
+      if (!raf) raf = requestAnimationFrame(frame);
+    }
+    /* play(ms, a, b): replay steps a..b; ms is the time a full day would take. Resolves when it reaches b or is paused */
+    function play(ms = 7000, a = null, b = STEPS - 1) {
+      if (!tgt || !tgt.log) return Promise.resolve(false);
+      const my = ++tok; playing = true; btn.textContent = "❚❚ Pause";
+      const start = a != null ? a : upto == null || upto >= b ? 0 : upto;
+      const dur = Math.max(1, (ms * (b - start)) / (STEPS - 1)), t0 = performance.now();
+      return new Promise((resolve) => {
+        const fr = (now) => {
+          if (my !== tok) return resolve(false);
+          upto = start + (b - start) * clamp((now - t0) / dur, 0, 1); draw();
+          if (upto < b) return requestAnimationFrame(fr);
+          playing = false;
+          if (b >= STEPS - 1) { upto = null; btn.textContent = label; draw(); } else btn.textContent = "▶ Resume";
+          resolve(true);
+        };
+        requestAnimationFrame(fr);
+      });
+    }
+    function pause() { tok++; playing = false; btn.textContent = "▶ Resume"; }
+    function stop() { tok++; playing = false; upto = null; btn.textContent = label; draw(); }
+    btn.addEventListener("click", () => { if (playing) pause(); else { play(); if (hooks.onPlay) hooks.onPlay(); } });
+    attachHover(cv, readout, () => (tgt ? { d: tgt.d, log: tgt.log } : {}), hooks.onHover);
+    onTheme(draw);
+    const el = h("div", {}, cv, h("div", { class: "btns", style: "align-items:center;margin:.4rem 0" }, btn, live), dayLegend(), h("p", { class: "note" }, CHART_NOTE), readout);
+    return { el, set, play, pause, stop, get: () => tgt };
+  }
+  /* metrics that pulse when their value changes; a changed label (under/over budget) is replaced too */
+  function setMetrics(box, list) {
+    if (box.children.length !== list.length) { box.innerHTML = ""; list.forEach(([k, v, c]) => box.append(metric(k, String(v), c || ""))); return; }
+    list.forEach(([k, v, c], i) => { const m = box.children[i], ke = m.querySelector(".k"), ve = m.querySelector(".v"); m.className = "metric " + (c || ""); if (ke.textContent !== k) ke.textContent = k; if (ve.textContent !== String(v)) { ve.textContent = String(v); pulse(m); } });
+  }
+  const sayBox = () => { const box = h("div"); box.say = (html, kind = "info") => { box.innerHTML = ""; if (html) box.append(callout(html, kind)); }; return box; };
+  /* example and edge buttons are demonstrations: while one runs, `demo` is above 0 and no mission target can tick */
+  let demo = 0;
+  const exampleBox = (items, box) => examples(items.map((it) => ({ ...it, run: async () => { box.say(""); demo++; try { await it.run(); } finally { demo--; } } })));
+
+  /* agentStep: mission on top, then the student's controls next to the day chart (day 101) and its cost receipt, then the examples under the controls.
+     opts.mission is a Lab.mission config whose targets test {d, log, ev, p, heat} after each change the student makes;
+     opts.heat adds the heat-wave slider; opts.help is html under the controls explaining them */
+  function agentStep(opts) {
+    const defaults = {}; opts.params.forEach((x) => (defaults[x.key] = x.default));
+    const p = { ...defaults };
+    let heat = 0, last = null;
+    const rc = costReceipt(), view = rc.attach(dayView("▶ Play the day", rc.hooks)), out = h("div", { class: "metrics" }), many = h("div", { class: "metrics" }), box = sayBox(), m = opts.mission ? mission(opts.mission) : null, mine = h("p", { class: "note" });
+    const C = {};
+    if (opts.heat) C.heat = range({ label: "Heat wave (°C above normal)", min: 0, max: 8, step: 1, value: 0, onchange: (v) => { heat = v; redraw(); } });
+    opts.params.forEach((x) => (C[x.key] = range({ label: x.label, min: x.min, max: x.max, step: x.step, value: x.default, fmt: x.fmt, onchange: (v) => { p[x.key] = v; redraw(); } })));
+    function redraw() {
+      const d = day(101, { heat }), log = run(opts.make(p), d), budget = budgetOf(d), left = budget - log.cost;
+      view.set(d, log, opts.extra ? opts.extra(log, p) : null);
+      setMetrics(out, [["Budget today (SAR)", fmt(budget, 0)], ["Cost today (SAR)", fmt(log.cost, 0), left >= 0 ? "good" : "bad"], [left >= 0 ? "Under budget by (SAR)" : "Over budget by (SAR)", fmt(Math.abs(left), 0), left >= 0 ? "good" : "bad"], ["Minutes above 27 °C", log.viol * 10, log.viol ? "bad" : "good"], ["Energy (MWh)", fmt(log.energy / 1000, 2)], ["Peak inlet temp", fmt(log.peak, 1) + " °C"]]);
+      const ev = evalMany(() => opts.make(p), PRACTICE, { heat });
+      setMetrics(many, [["Money left over 10 days (SAR)", signed(ev.left), ev.left >= 0 ? "good" : "bad"], ["Days within budget", `${ev.within} of ${PRACTICE.length}`, ev.within === PRACTICE.length ? "good" : ""], ["Avg cost (SAR/day)", fmt(ev.cost, 0)], ["Avg minutes above limit", fmt(ev.viol * 10, 0), ev.viol > 0.5 ? "bad" : "good"]]);
+      mine.innerHTML = "<b>Your settings:</b> " + opts.params.map((x) => `${x.label.replace(/ \(.*\)$/, "")} ${x.fmt ? x.fmt(p[x.key]) : p[x.key]}`).join(" · ") + (opts.heat ? ` · heat wave +${heat} °C` : "") + ` → today ${log.viol * 10} minutes above 27 °C, cost ${fmt(log.cost, 0)} SAR, ${vsBudget(left)}; over 10 days ${signed(ev.left)} SAR left, ${ev.within} of ${PRACTICE.length} days within budget${opts.more ? opts.more(log) : ""}.`;
+      last = { d, log, ev, budget, left };
+      if (opts.after) opts.after(p);
+      if (m && !demo) m.update({ ...last, p: { ...p }, heat });
+      return last;
+    }
+    const api = {
+      C, p, view, now: () => last, say: box.say,
+      /* jump to a known state (defaults plus overrides), then pause briefly so the morph is visible */
+      reset: async (vals = {}) => {
+        view.stop();
+        Object.entries({ ...(opts.heat ? { heat: 0 } : {}), ...defaults, ...vals }).forEach(([k, v]) => { C[k].set(v); if (k === "heat") heat = v; else p[k] = v; });
+        const r = redraw(); await sleep(550); return r;
+      },
+      glide: async (k, v, ms = 1200) => { await C[k].animateTo(v, ms); return last; },
+    };
+    redraw();
+    return h("div", {}, m,
+      h("div", { class: "lab" },
+        h("div", { class: "controls" }, h("h3", { style: "margin:0" }, "Your controls"), ...opts.params.map((x) => C[x.key]), C.heat || null, opts.help ? h("div", { class: "note", html: opts.help }) : null, exampleBox(opts.examples(api), box), box),
+        h("div", { class: "stage" }, view.el, rc.el, h("h3", {}, "Day 101 with your settings"), out, mine, h("h3", {}, "Across the 10 practice days (the performance measure)"), many, h("p", { class: "note" }, BUDGET_NOTE), opts.below || null)));
+  }
+
+  /* a compact temperature chart for the environment step */
+  function drawTemps(cv, o) {
+    const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+    const P = palette(), col = (c) => (typeof c === "function" ? c(P) : c.startsWith("--") ? css(c) : c);
+    const pad = { l: 54, r: 16 }, y0 = 14, y1 = H - 30, lo = 18, hi = 32;
+    const X = (t) => pad.l + (t / (STEPS - 1)) * (W - pad.l - pad.r), Y = (v) => y1 - ((clamp(v, lo, hi) - lo) / (hi - lo)) * (y1 - y0);
+    ctx.font = "12px Public Sans, system-ui"; ctx.textBaseline = "middle"; ctx.lineWidth = 1;
+    [18, 22, 26, 30].forEach((v) => { ctx.strokeStyle = P.grid; ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(W - pad.r, Y(v)); ctx.stroke(); ctx.fillStyle = P.label; ctx.textAlign = "right"; ctx.fillText(v + "°", pad.l - 6, Y(v)); });
+    ctx.fillStyle = P.hotZone; ctx.fillRect(pad.l, y0, W - pad.l - pad.r, Y(LIMIT) - y0);
+    ctx.strokeStyle = P.limit; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(pad.l, Y(LIMIT)); ctx.lineTo(W - pad.r, Y(LIMIT)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = P.limit; ctx.textAlign = "right"; ctx.fillText("27 °C limit", W - pad.r - 4, Y(LIMIT) - 8);
+    ctx.fillStyle = P.label; ctx.textAlign = "center"; for (let hr = 0; hr <= 24; hr += 3) ctx.fillText(`${hr}:00`, X(Math.min(STEPS - 1, hr * 6)), H - 12);
+    ctx.textAlign = "left";
+    if (o.dots) { const n = o.dotsUpto ?? STEPS - 1; ctx.fillStyle = P.dots; for (let t = 0; t <= n; t++) { ctx.beginPath(); ctx.arc(X(t), Y(o.dots[t]), 1.9, 0, 7); ctx.fill(); } }
+    (o.lines || []).forEach((L) => { const n = L.upto ?? STEPS - 1; ctx.globalAlpha = L.alpha ?? 1; ctx.strokeStyle = col(L.color); ctx.lineWidth = L.width || 2; ctx.beginPath(); for (let t = 0; t <= n; t++) (t ? ctx.lineTo(X(t), Y(L.T[t])) : ctx.moveTo(X(t), Y(L.T[t]))); ctx.stroke(); ctx.globalAlpha = 1; });
+    if (o.cursor != null) {
+      const x = X(o.cursor), lbl = o.cursorLabel ? o.cursorLabel(o.cursor) : hhmm(o.cursor);
+      ctx.strokeStyle = P.cursor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+      ctx.font = "bold 12px Public Sans, system-ui"; const w = ctx.measureText(lbl).width + 10, lx = clamp(x + 6, pad.l, W - pad.r - w);
+      ctx.fillStyle = P.cursor; ctx.fillRect(lx, y1 - 22, w, 16); ctx.fillStyle = P.dark ? "#1a1f2a" : "#fff"; ctx.fillText(lbl, lx + 5, y1 - 14);
+    }
+  }
+
+  /* step 1: the hall as an animated diagram. Servers heat the air, the cooling units blow cold air to the rack inlets, heat leaks in through the
+     wall, the controller sets the cooling level and the meter counts the electricity. A small live copy of the simulator (2 MW of servers,
+     one 10-minute step every 2 seconds) moves the inlet temperature, so the diagram follows the same physics as the day charts. st = {level, out} */
+  function hallDiagram(st) {
+    const W = 760, H = 400, cv = canvas(W, H), ctx = cv.getContext("2d"), LOAD = 2;
+    const sim = { T: 25, ueff: st.level };
+    const hall = { x0: 130, x1: 600, y0: 40, y1: 352 }, racks = [200, 290, 380].map((x) => ({ x, y0: 140, y1: 330, w: 52 })), unit = { x: 488, y0: 236, y1: 330, w: 92 };
+    const rnd = RNG(7), cold = Array.from({ length: 45 }, () => ({ s: rnd(), lane: rnd.int(3), j: rnd() })), hot = Array.from({ length: 33 }, () => ({ s: rnd(), rack: rnd.int(3), j: rnd() })), leak = Array.from({ length: 12 }, () => ({ s: rnd(), y: 90 + rnd() * 230 }));
+    let last = 0, running = false, spin = 0, clock = 0;
+    const lerp = (a, b, k) => a + (b - a) * k;
+    function step(dt) {
+      const steps = dt * 0.5, k = 1 - Math.pow(1 - TRUE.lag, steps);
+      sim.ueff += k * (st.level - sim.ueff);
+      sim.T = clamp(sim.T + steps * (DT / TRUE.cth) * (LOAD + TRUE.kenv * (st.out - sim.T) - TRUE.gain * sim.ueff), 14, 45);
+      const f = sim.ueff / 10, leakMW = TRUE.kenv * (st.out - sim.T);
+      cold.forEach((p) => (p.s = (p.s + dt * (0.04 + 0.32 * f)) % 1));
+      hot.forEach((p) => (p.s = (p.s + dt * (0.06 + 0.22 * f)) % 1));
+      leak.forEach((p) => (p.s = (p.s + dt * clamp(leakMW, 0, 1.5) * 0.5) % 1));
+      spin += dt * (0.5 + 9 * f); clock += dt;
+    }
+    function draw() {
+      const P = palette(), f = sim.ueff / 10, hotIn = sim.T > LIMIT, leakMW = TRUE.kenv * (st.out - sim.T);
+      ctx.clearRect(0, 0, W, H); ctx.textBaseline = "middle"; ctx.font = "12px Public Sans, system-ui";
+      // outside: the sun and the heat leaking in through the wall
+      const sunHot = clamp((st.out - 20) / 28, 0, 1);
+      ctx.fillStyle = P.out; ctx.globalAlpha = 0.25 + 0.5 * sunHot; ctx.beginPath(); ctx.arc(62, 70, 22 + 8 * sunHot, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = P.out; ctx.beginPath(); ctx.arc(62, 70, 15, 0, 7); ctx.fill();
+      ctx.fillStyle = P.ink; ctx.textAlign = "center"; ctx.font = "600 12px Public Sans, system-ui"; ctx.fillText(`outside ${st.out} °C`, 62, 112); ctx.font = "12px Public Sans, system-ui";
+      if (leakMW > 0.01) leak.forEach((p) => { const x = lerp(30, hall.x0 + 26, p.s); ctx.globalAlpha = clamp(leakMW / 0.6, 0.15, 1) * Math.sin(Math.PI * p.s); ctx.strokeStyle = P.out; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x - 10, p.y); ctx.lineTo(x, p.y); ctx.lineTo(x - 4, p.y - 4); ctx.moveTo(x, p.y); ctx.lineTo(x - 4, p.y + 4); ctx.stroke(); });
+      ctx.globalAlpha = 1; ctx.fillStyle = P.label; ctx.fillText("heat leaks in", 62, 340);
+      // the hall
+      ctx.fillStyle = P.dark ? "rgba(255,255,255,.03)" : "rgba(36,48,65,.03)"; ctx.fillRect(hall.x0, hall.y0, hall.x1 - hall.x0, hall.y1 - hall.y0);
+      ctx.strokeStyle = P.label; ctx.lineWidth = 2; ctx.strokeRect(hall.x0, hall.y0, hall.x1 - hall.x0, hall.y1 - hall.y0);
+      ctx.fillStyle = P.label; ctx.textAlign = "left"; ctx.font = "600 12px Public Sans, system-ui"; ctx.fillText("the hall", hall.x0 + 8, hall.y0 + 14); ctx.font = "12px Public Sans, system-ui";
+      // hot air rising from the servers and returning to the cooling unit along the ceiling
+      hot.forEach((p) => { const r = racks[p.rack], x0 = r.x + 8 + p.j * (r.w - 16); let x, y; if (p.s < 0.35) { const k = p.s / 0.35; x = x0; y = lerp(r.y0 - 4, hall.y0 + 30, k); } else if (p.s < 0.75) { const k = (p.s - 0.35) / 0.4; x = lerp(x0, unit.x + unit.w / 2, k); y = hall.y0 + 30 + p.j * 10; } else { const k = (p.s - 0.75) / 0.25; x = unit.x + unit.w / 2 + (p.j - 0.5) * 30; y = lerp(hall.y0 + 30, unit.y0 - 6, k); }
+        ctx.globalAlpha = 0.35 + 0.45 * clamp((sim.T - 20) / 12, 0, 1); ctx.fillStyle = P.limit; ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 7); ctx.fill(); });
+      // cold air from the cooling unit along the floor, up to the rack inlets
+      cold.forEach((p) => { const r = racks[p.lane], xr = r.x + r.w + 10 + p.j * 10; let x, y; if (p.s < 0.55) { const k = p.s / 0.55; x = lerp(unit.x - 4, xr, k); y = hall.y1 - 10 - p.j * 6; } else { const k = (p.s - 0.55) / 0.45; x = xr; y = lerp(hall.y1 - 12, r.y0 + 20 + p.j * 40, k); }
+        ctx.globalAlpha = 0.12 + 0.88 * f; ctx.strokeStyle = P.cool; ctx.lineWidth = 2; ctx.beginPath(); if (p.s < 0.55) { ctx.moveTo(x + 6, y); ctx.lineTo(x, y); ctx.lineTo(x + 3, y - 3); ctx.moveTo(x, y); ctx.lineTo(x + 3, y + 3); } else { ctx.moveTo(x, y + 6); ctx.lineTo(x, y); ctx.lineTo(x - 3, y + 3); ctx.moveTo(x, y); ctx.lineTo(x + 3, y + 3); } ctx.stroke(); });
+      ctx.globalAlpha = 1;
+      // server racks with blinking lights
+      racks.forEach((r, i) => { ctx.fillStyle = P.dark ? "#2d3647" : "#3a4558"; ctx.fillRect(r.x, r.y0, r.w, r.y1 - r.y0); for (let k = 0; k < 9; k++) { const on = Math.sin(clock * (3 + i) + k * 1.7) > 0; ctx.fillStyle = on ? "#7fe0a8" : "#5b6578"; ctx.fillRect(r.x + 8, r.y0 + 12 + k * 20, 6, 4); ctx.fillStyle = "#56627a"; ctx.fillRect(r.x + 20, r.y0 + 12 + k * 20, r.w - 28, 4); } });
+      ctx.fillStyle = P.ink; ctx.textAlign = "center"; ctx.fillText("servers: 2 MW of heat", racks[1].x + racks[1].w / 2, racks[0].y0 - 14);
+      // cooling unit with its fan
+      ctx.fillStyle = P.dark ? "#26324a" : "#e8eefc"; ctx.strokeStyle = P.cool; ctx.lineWidth = 2; ctx.fillRect(unit.x, unit.y0, unit.w, unit.y1 - unit.y0); ctx.strokeRect(unit.x, unit.y0, unit.w, unit.y1 - unit.y0);
+      const fx = unit.x + unit.w / 2, fy = unit.y0 + 40; ctx.strokeStyle = P.cool; ctx.beginPath(); ctx.arc(fx, fy, 24, 0, 7); ctx.stroke();
+      for (let b = 0; b < 3; b++) { const a = spin + (b * 2 * Math.PI) / 3; ctx.fillStyle = P.cool; ctx.beginPath(); ctx.ellipse(fx + Math.cos(a) * 11, fy + Math.sin(a) * 11, 11, 4.5, a, 0, 7); ctx.fill(); }
+      ctx.fillStyle = P.ink; ctx.fillText("cooling unit", fx, unit.y1 - 14);
+      // inlet temperature sensor on the middle rack
+      const sx = racks[1].x + racks[1].w + 4, sy = 236, sc = hotIn ? P.limit : sim.T < 22 ? P.cool : P.tariff[0];
+      ctx.fillStyle = sc; ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 7); ctx.fill();
+      const lbl = `inlet sensor ${sim.T.toFixed(1)} °C`; ctx.font = "bold 12px Public Sans, system-ui"; const lw = ctx.measureText(lbl).width + 12;
+      ctx.fillStyle = sc; ctx.fillRect(sx + 10, sy - 30, lw, 20); ctx.fillStyle = P.dark ? "#141922" : "#fff"; ctx.textAlign = "left"; ctx.fillText(lbl, sx + 16, sy - 20); ctx.font = "12px Public Sans, system-ui";
+      if (hotIn) { ctx.fillStyle = P.limit; ctx.fillText("above 27 °C: 1,000 SAR every 10 minutes", hall.x0 + 8, hall.y0 + 32); }
+      // controller with its 0 to 10 knob
+      const panel = (x, y, w, hh, title) => { ctx.fillStyle = P.panel; ctx.strokeStyle = P.grid; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x, y, w, hh, 10); ctx.fill(); ctx.stroke(); ctx.fillStyle = P.label; ctx.textAlign = "center"; ctx.font = "600 12px Public Sans, system-ui"; ctx.fillText(title, x + w / 2, y + 16); ctx.font = "12px Public Sans, system-ui"; };
+      panel(618, 40, 134, 140, "controller");
+      const kx = 685, ky = 108, a0 = 0.75 * Math.PI, a1 = 2.25 * Math.PI, aL = a0 + (a1 - a0) * (st.level / 10);
+      ctx.lineCap = "round"; ctx.strokeStyle = P.grid; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(kx, ky, 34, a0, a1); ctx.stroke();
+      ctx.strokeStyle = P.cool; ctx.beginPath(); ctx.arc(kx, ky, 34, a0, Math.max(a0 + 0.001, aL)); ctx.stroke(); ctx.lineCap = "butt";
+      ctx.strokeStyle = P.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(kx + Math.cos(aL) * 24, ky + Math.sin(aL) * 24); ctx.stroke();
+      ctx.fillStyle = P.ink; ctx.font = "bold 13px Public Sans, system-ui"; ctx.fillText(`level ${st.level}`, kx, ky + 50); ctx.font = "11px Public Sans, system-ui"; ctx.fillStyle = P.label; ctx.fillText("0", kx - 30, ky + 32); ctx.fillText("10", kx + 30, ky + 32); ctx.font = "12px Public Sans, system-ui";
+      // electricity meter: needle for the power drawn now (the units ramp slowly), and the power the set level will settle at
+      panel(618, 194, 134, 158, "electricity meter");
+      const mw = coolPower(sim.ueff, st.out), mx = 685, my = 284, g0 = Math.PI, g = g0 + Math.PI * clamp(mw / 1.6, 0, 1);
+      ctx.strokeStyle = P.grid; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(mx, my, 40, Math.PI, 2 * Math.PI); ctx.stroke();
+      ctx.strokeStyle = P.out; ctx.beginPath(); ctx.arc(mx, my, 40, Math.PI, g + 0.001); ctx.stroke();
+      ctx.strokeStyle = P.ink; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(g) * 34, my + Math.sin(g) * 34); ctx.stroke();
+      const target = coolPower(st.level, st.out), ramping = Math.abs(target - mw) > 0.005;
+      ctx.fillStyle = P.ink; ctx.font = "bold 13px Public Sans, system-ui"; ctx.fillText(`${fmt(mw, 2)} MW now`, mx, my + 18); ctx.font = "12px Public Sans, system-ui";
+      ctx.fillStyle = ramping ? P.out : P.label; ctx.fillText(ramping ? `ramping ${target > mw ? "up" : "down"} to ${fmt(target, 2)} MW` : `steady at level ${st.level}`, mx, my + 38);
+      ctx.fillStyle = P.label; ctx.fillText(`${fmt(mw * 1000 * 0.32, 0)} SAR/h at day tariff`, mx, my + 56);
+      // heat balance
+      const out = TRUE.gain * sim.ueff, inn = LOAD + leakMW, trend = inn - out > 0.05 ? "the hall is warming up" : inn - out < -0.05 ? "the hall is cooling down" : "the hall holds its temperature";
+      ctx.fillStyle = P.ink; ctx.textAlign = "left"; ctx.fillText(`Heat in: servers 2.0 MW ${leakMW >= 0 ? "+" : "−"} wall ${fmt(Math.abs(leakMW), 2)} MW   ·   heat removed by the cooling: ${fmt(out, 2)} MW   →   ${trend}`, hall.x0, 378);
+    }
+    function frame(now) {
+      if (!running) return;
+      const dt = last ? Math.min(0.05, (now - last) / 1000) : 0; last = now;
+      step(dt); draw(); requestAnimationFrame(frame);
+    }
+    new IntersectionObserver((es) => { const vis = es[0].isIntersecting; if (vis && !running) { running = true; last = 0; requestAnimationFrame(frame); } else if (!vis) running = false; }).observe(cv);
+    onTheme(draw); draw();
+    return { el: cv, sim, draw };
+  }
+  /* "What does cooling cost?": the same numbers as the simulator, for one cooling level held a whole day at one outside temperature.
+     The day is simulated with the diagram's physics (2 MW of servers, hall starting at 25 °C), so the penalties are counted too. */
+  function coolingCostPanel(st, budget101) {
+    const el = h("div", { style: "border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin:.6rem 0;background:var(--panel);font-variant-numeric:tabular-nums" });
+    const row = (a, b, cls = "") => `<tr class="${cls}"><td>${a}</td><td style="text-align:right">${b}</td></tr>`;
+    const perDayKwhPrice = PRICE.reduce((s, pr) => s + pr, 0) * DT * 1000;   // SAR per MW held for a whole day
+    function heldDay(L, out) {   // 144 steps at level L: minutes above the limit and the temperature at the end
+      let T = 25, viol = 0;
+      for (let t = 0; t < STEPS; t++) { T = clamp(T + (DT / TRUE.cth) * (2 + TRUE.kenv * (out - T) - TRUE.gain * L), 14, 45); if (T > LIMIT) viol++; }
+      return { viol, T };
+    }
+    function update() {
+      const L = st.level, mw = coolPower(L, st.out), fans = 0.25 * Math.pow(L / 10, 3), units = mw - fans, kwh = mw * 1000, elec = mw * perDayKwhPrice;
+      const settle = st.out + (2 - TRUE.gain * L) / TRUE.kenv, { viol } = heldDay(L, st.out), pen = viol * PENALTY, total = elec + pen, left = budget101 - total;
+      const red = (s) => `<span style="color:var(--coral)">${s}</span>`;
+      el.innerHTML = `<b>What does cooling cost?</b> Level ${L}, ${st.out} °C outside, held all day
+        <div class="note" style="margin:.2rem 0">The numbers once the cooling units have reached level ${L} (the meter in the diagram catches up in about an hour of hall time, about 12 seconds here). The day starts at 25 °C with 2 MW of servers, as in the diagram.</div>
+        <table style="width:100%;margin:.3rem 0">${row("Cooling power", `<b>${fmt(mw, 2)} MW</b> (fans ${fmt(fans, 2)} + cooling units ${fmt(units, 2)})`)}
+        ${row("One hour: night / day / peak (0.18 / 0.32 / 0.48 SAR/kWh)", `${fmt(kwh * 0.18, 0)} / ${fmt(kwh * 0.32, 0)} / ${fmt(kwh * 0.48, 0)} SAR`)}
+        ${row("Electricity, all day", `${fmt(elec, 0)} SAR`)}
+        ${row("Inlet temperature settles at", settle > 45 ? red("above 45 °C (keeps rising)") : settle > LIMIT ? red(`${fmt(settle, 1)} °C`) : settle < 14 ? "below 14 °C (overcooled)" : `${fmt(settle, 1)} °C`)}
+        ${row("Minutes above 27 °C", viol ? red(`${fmt(viol * 10, 0)} min`) : "0 min")}
+        ${row("Penalties (1,000 SAR per 10 min above 27 °C)", viol ? red(`${fmt(pen, 0)} SAR`) : "0 SAR")}
+        ${row("<b>Cost of the day</b> (electricity + penalties)", `<b>${fmt(total, 0)} SAR</b>`)}</table>
+        <div>${viol ? `Too little cooling: the hall goes above 27 °C, and the penalties (${fmt(pen, 0)} SAR) dwarf the electricity (${fmt(elec, 0)} SAR). ${red(`Over the 4,150 SAR budget of day 101 by ${fmt(-left, 0)} SAR.`)}` : left >= 0 ? `Safe all day, ${fmt(left, 0)} SAR under the 4,150 SAR budget of day 101.` : `Safe all day, but ${fmt(-left, 0)} SAR over the 4,150 SAR budget of day 101: more cooling than needed.`}</div>`;
+    }
+    update(); return { el, update };
+  }
+
+  const steps = [];
+  steps.push({
+    id: "scenario", title: "The scenario: keep the servers cool, cheaply", time: 10,
+    mission: true,
+    theory: `<h3>The problem</h3>
+      <p>A data center hall with <b>2 to 4 MW</b> of servers (1 MW = a million watts, about what 750 homes use). Almost all of it becomes heat. The job: keep the air at the server inlets <b>below 27 °C</b> while paying as little as possible for cooling.</p>
+      <p><b>Why it is hard:</b> the cooling units <b>ramp slowly</b> (62% of a change after one hour) and the hall stores heat. What you do now shows up later, so the agent has to <b>anticipate</b>, not just react.</p>
+      <h3>The vocabulary, applied to our hall</h3>
+      <div class="wide"><table>
+        <tr><th>Term</th><th>Meaning</th><th>In our hall</th></tr>
+        <tr><td><b>Environment</b></td><td>The world the agent acts in</td><td>The hall: servers, outside air, cooling units, electricity tariff</td></tr>
+        <tr><td><b>Agent</b></td><td>Perceives through sensors, acts through actuators</td><td>The cooling controller</td></tr>
+        <tr><td><b>Percepts</b></td><td>What it reads at each step</td><td>Inlet temperature (one noisy sensor), IT load, outside temperature, price, batch-job schedule</td></tr>
+        <tr><td><b>Action</b></td><td>What it can change</td><td>The cooling level, 0 to 10, every 10 minutes: 144 decisions a day</td></tr>
+        <tr><td><b>Agent function</b></td><td>The rule, on paper: percept history → action</td><td>"Given everything seen so far, which level now?"</td></tr>
+        <tr><td><b>Agent program</b></td><td>The code that implements the function</td><td>Steps 4 to 8: five programs, each smarter than the last</td></tr>
+        <tr><td><b>Performance measure</b></td><td>How we judge the agent, from outside</td><td>The day's cost: electricity bill + 1,000 SAR per 10 minutes above 27 °C</td></tr>
+        <tr><td><b>Rational</b></td><td>Best <i>expected</i> performance, given what it perceives and knows</td><td>Not omniscient: it cannot know the load in 10 minutes</td></tr>
+      </table></div>
+      <h3>How we score a day</h3>
+      <ul>
+        <li><b>Cost</b> = cooling electricity + penalties (1,000 SAR per 10 minutes above 27 °C).</li>
+        <li><b>Electricity</b>: power (MW) × time = energy (MWh; 1 MW for 10 minutes = 167 kWh). Energy × tariff = SAR. Tariff per kWh: 0.18 at night (22:00 to 08:00), 0.32 by day, 0.48 at the peak (13:00 to 17:00).</li>
+        <li><b>Power grows fast with the level</b>: fan power grows with the cube of the level, so level 10 costs about 2.3 times level 5. Hot outside air makes cooling less efficient.</li>
+        <li><b>Budget</b> = the best possible cost of the day (the omniscient agent, which knows the future) + 10%, rounded up to the next 10 SAR. A day ends under budget (good) or over budget (bad).</li>
+        <li><b>Money left over 10 days</b> = the sum of (budget − cost). Every later step and the tournament use it.</li>
+      </ul>
+      <p>Below: the hall diagram (move the sliders), PEAS, and one day with its <b>cost receipt</b> adding up the bill.</p>`,
+    ask: `<div class='q'>Ask the class first, then reveal</div>
+      <div class='a'>Start with the hall diagram: "How much does cooling cost?" Drag the cooling level and read the panel next to it. At 35 °C outside, level 5 draws 0.59 MW: 587 kWh per hour, 106 SAR per hour at night and 282 at the peak, 4,062 SAR if held all day, close to the 4,150 SAR budget of day 101. "Level 5 vs level 10" shows that doubling the level multiplies the power by 2.3, because the fan power grows with the cube of the level. The edge case "Level 0" shows the meter stop and the inlet temperature run away.</div>
+      <div class='a'>"What does the controller see?" (percepts) "What can it do?" (one knob) "How do we judge it?" (bill plus violations, against a budget). Students type a guess in each PEAS row, then press Reveal PEAS: the rows appear one by one, with their guess under the answer.</div>
+      <div class='a'>Then press "Play the day" and narrate while the cursor moves: the batch job band, the price ribbon, the cooling rising early. "Slow motion through the batch job" pauses an hour before the job so the class can predict what the agent will do. "The sensor lies a little" shows that the agent never sees the true line; the measure is scored on it anyway.</div>
+      <div class='a'>Details if asked (removed from the student text): fans take 0.25 MW × (level ÷ 10)³; the cooling units remove 0.5 MW of heat per level and need about 1 MW of electricity per 5.5 MW of heat, less in hot weather. 27 °C is the ASHRAE A1 recommended inlet limit. Only cooling is billed: the servers' own electricity does not depend on the controller. Real-world hook: in 2016 DeepMind reported cutting Google's data-center cooling energy by about 40% with a learning controller doing this job. Agent function vs program: the function is the abstract mapping (an infinite table over percept histories); the program is the finite code that runs on the controller.</div>
+      <div class='a'>Mission targets: a guess in all four PEAS rows, Reveal PEAS, the ▶ Play button under the chart (the example buttons do not count), hovering over the chart during the batch job on day 101 (15:00 to 18:00) and at the peak tariff. Spend a minute on the budget in the theory: every later step reports money left in the budget. Day 101 here costs 3,905 SAR against a budget of 4,150 SAR: 245 SAR under budget.</div>`,
+    mount() {
+      const peas = [["Performance measure", "Electricity cost of cooling (SAR) + 1000 SAR per 10 minutes with inlet air above 27 °C, compared with the day's budget."], ["Environment", "The hall: servers producing heat (load changes, batch jobs), heat leaking in from outside, cooling units that ramp slowly, a tariff that changes by hour."], ["Actuators", "The cooling level, 0 to 10, set every 10 minutes."], ["Sensors", "One noisy inlet temperature sensor, the IT load meter, the outside temperature, the electricity price, the job schedule."]];
+      const state = { guesses: 0, revealed: false, played: false, hoveredJob: false, peakCost: false };
+      const m = mission({
+        goal: "Describe the cooling agent with PEAS in your own words, check it against the answer, then watch one day of the finished agent and see how its cost adds up.",
+        how: [
+          "Type your guess in each of the four PEAS rows below: what is the agent judged on, where does it act, what can it change, what can it read?",
+          "Press <b>Reveal PEAS</b>. Each row shows the answer with your guess under it; compare them.",
+          "Press <b>▶ Play the day</b> under the chart and follow the red time cursor through the 144 decisions. The <b>cost receipt</b> under the chart adds up the bill step by step.",
+          "Move the mouse over the chart inside the purple batch-job band (in the afternoon) and read the IT load in the line under the chart.",
+          "Move the mouse to a moment between 13:00 and 17:00: the receipt shows what those 10 minutes cost at the peak tariff. Compare with a moment at night.",
+        ],
+        targets: [
+          { text: "A guess in all four PEAS rows", test: (s) => s.guesses === 4 },
+          { text: "Reveal PEAS and compare", test: (s) => s.revealed },
+          { text: "Play the day with the ▶ button under the chart", test: (s) => s.played },
+          { text: "Read the load during the batch job (hover over the purple band)", test: (s) => s.hoveredJob },
+          { text: "Read the cost of 10 minutes at the peak tariff (hover between 13:00 and 17:00)", test: (s) => s.peakCost },
+        ],
+      });
+      const rows = peas.map(([k, v]) => { const inp = h("input", { type: "text", placeholder: "your guess", style: "width:100%" }), td = h("td", {}, inp); inp.addEventListener("input", () => { state.guesses = rows.filter((r) => r.inp.value.trim().length >= 3).length; if (!state.revealed) { btn.disabled = state.guesses < 4; btn.textContent = state.guesses < 4 ? `Reveal PEAS (${state.guesses} of 4 written)` : "Reveal PEAS"; } m.update(state); }); return { tr: h("tr", {}, h("th", {}, k), td), td, inp, v }; });
+      const btn = h("button", { class: "ghost", disabled: "" }, "Reveal PEAS (0 of 4 written)");   // unlocks once every row has a guess (3+ characters)
+      btn.addEventListener("click", async () => { btn.disabled = true; for (const r of rows) { const g = r.inp.value.trim(); r.td.innerHTML = ""; r.td.append(h("div", {}, r.v), h("div", { class: "note" }, g ? `Your guess: ${g}` : "No guess written.")); pulse(r.tr); await sleep(380); } btn.textContent = "PEAS revealed"; state.revealed = true; m.update(state); });
+
+      /* the hall diagram and its cost panel, driven by two sliders */
+      const hs = { level: 5, out: 35 }, hall = hallDiagram(hs), d = day(101), costPanel = coolingCostPanel(hs, budgetOf(d)), hbox = sayBox();
+      const lvl = range({ label: "Cooling level (0 to 10)", min: 0, max: 10, step: 1, value: hs.level, onchange: (v) => { hs.level = v; costPanel.update(); } });
+      const outT = range({ label: "Outside temperature (°C)", min: 20, max: 48, step: 1, value: hs.out, fmt: (v) => v + " °C", onchange: (v) => { hs.out = v; costPanel.update(); } });
+      const hallEx = exampleBox([
+        { label: "Level 5 vs level 10", note: "Double the cooling level and watch the meter's needle and the panel. Is the power doubled too?",
+          run: async () => { await outT.animateTo(35, 500); await lvl.animateTo(5, 700); const a = coolPower(5, 35); await sleep(800); await lvl.animateTo(10, 1500); const b = coolPower(10, 35); hbox.say(`At 35 °C outside: level 5 draws ${fmt(a, 2)} MW, level 10 draws ${fmt(b, 2)} MW, ${fmt(b / a, 1)} times as much for twice the cooling. The fans grow with the cube of the level, so the last steps are the dearest.`); } },
+        { label: "A hot afternoon: 30 to 46 °C", note: "Same cooling level 5, but the outside air heats up. Watch the orange heat leaking in through the wall and the meter.",
+          run: async () => { await lvl.animateTo(5, 600); await outT.animateTo(30, 700); const a = coolPower(5, 30); await sleep(600); await outT.animateTo(46, 2200); const b = coolPower(5, 46); hbox.say(`Level 5 draws ${fmt(a, 3)} MW at 30 °C and ${fmt(b, 3)} MW at 46 °C: the cooling units work less efficiently in the heat, and more heat leaks in, so the same level holds a warmer hall.`); } },
+        { label: "Level 0: cooling off", kind: "edge", note: "Turn the cooling off. The meter stops, but the servers keep heating. Watch the inlet sensor.",
+          run: async () => { await outT.animateTo(35, 500); await lvl.animateTo(0, 1200); const t0 = hall.sim.T; await sleep(5000); hbox.say(`Power ${fmt(coolPower(0, hs.out), 2)} MW and 0 SAR on the meter, but the inlet went from ${fmt(t0, 1)} °C to ${fmt(hall.sim.T, 1)} °C in 5 seconds (about 25 minutes of hall time). Cheap electricity, expensive penalties.`, "edge"); } },
+      ], hbox);
+
+      const box = sayBox(), log0 = run(agents.utility(UDEF), d);
+      const rc = costReceipt((t, dd) => {
+        if (dd === d && d.jobs.some((j) => t >= j.start && t < j.end)) state.hoveredJob = true;
+        if (price(t) === 0.48) state.peakCost = true;
+        m.update(state);
+      });
+      const view = rc.attach(dayView("▶ Play the day", { ...rc.hooks, onPlay: () => { state.played = true; m.update(state); } }));
+      view.set(d, log0);
+      const j0 = Math.min(...d.jobs.map((j) => j.start)), j1 = Math.max(...d.jobs.map((j) => j.end));
+      let gap = -Infinity, tg = 0; log0.T.forEach((v, t) => { if (log0.Tm[t] - v > gap) { gap = log0.Tm[t] - v; tg = t; } });
+      const ex = exampleBox([
+        { label: "Play the day", note: "144 decisions, one every 10 minutes. Follow the red cursor: the cooling level (blue, bottom panel) rises before the purple batch-job band, and the bold inlet line stays under the dashed 27 °C limit. The cost receipt under the chart adds up the bill step by step and compares it with the day's budget.",
+          run: async () => { view.set(d, log0); await view.play(9000, 0); box.say(`End of the day: ${res(log0)}.`); } },
+        { label: "Slow motion through the batch job", note: "The replay runs fast until an hour before the first job, stops, then crawls through the jobs. Watch the command go up while the temperature is still low: the agent acts on the schedule, not on the thermometer.",
+          run: async () => { view.set(d, log0); await view.play(5000, 0, Math.max(0, j0 - 6)); await sleep(1200); await view.play(40000, null, Math.min(STEPS - 1, j1 + 6)); box.say(`During the jobs (${hhmm(j0)} to ${hhmm(j1)}) the inlet peaked at ${fmt(Math.max(...log0.T.slice(j0, j1)), 1)} °C.`); await view.play(5000); } },
+        { label: "The sensor lies a little", kind: "edge", note: "The cursor stops at the moment when the reading is furthest above the truth. The performance measure counts the true temperature, which the agent never sees directly.",
+          run: async () => { view.set(d, log0); await view.play(6000, 0, tg); box.say(`At ${hhmm(tg)} the sensor reads ${fmt(log0.Tm[tg], 2)} °C but the true inlet is ${fmt(log0.T[tg], 2)} °C, a gap of ${fmt(gap, 2)} °C. A violation is counted only when the true temperature is above 27 °C.`, "edge"); } },
+        { label: "A heat wave of 8 °C", kind: "edge", note: "The same agent on the same day, with the outside air 8 °C hotter. Watch the outside-temperature panel lift and the cooling work harder, then compare the bill.",
+          run: async () => { const d8 = day(101, { heat: 8 }), l8 = run(agents.utility(UDEF), d8); view.set(d8, l8); await sleep(700); await view.play(7000, 0); box.say(`Normal day: ${res(log0)}, energy ${fmt(log0.energy / 1000, 2)} MWh. Heat wave: ${res(l8)}, energy ${fmt(l8.energy / 1000, 2)} MWh.`, "edge"); await sleep(1800); view.set(d, log0); } },
+      ], box);
+      return h("div", {}, m,
+        h("h3", {}, "The hall, and what cooling costs"),
+        h("div", { class: "lab" }, h("div", { class: "controls" }, h("h3", { style: "margin:0" }, "Your controls"), lvl, outT, h("p", { class: "note" }, "The diagram runs a small copy of the simulator: one 10-minute step every 2 seconds, with 2 MW of servers."), hallEx, hbox), h("div", { class: "stage" }, hall.el, costPanel.el)),
+        h("h3", {}, "PEAS for the cooling controller"), h("table", {}, ...rows.map((r) => r.tr)), btn,
+        h("h3", {}, "One day, controlled by the agent we will have built by step 7"), h("div", { class: "lab" }, h("div", { class: "controls" }, ex, box), h("div", { class: "stage" }, view.el, rc.el, h("p", { class: "note" }, "Notice how it raises the cooling before the batch job starts, not after."))));
+    },
+  });
+
+  steps.push({
+    id: "environment", title: "Properties of the task environment", time: 15,
+    mission: true,
+    theory: `<h3>Classify before you design</h3>
+      <table><tr><th>Property</th><th>Question</th><th>Our hall</th></tr>
+      <tr><td>Fully vs partially observable</td><td>Do the sensors give the complete state?</td><td>Partial: one noisy sensor, no view of each rack, no exact future load.</td></tr>
+      <tr><td>Single vs multiagent</td><td>Do other agents' choices affect my performance?</td><td>Single (the job scheduler is part of the environment; it could become a second agent).</td></tr>
+      <tr><td>Deterministic vs stochastic</td><td>Is the next state fixed by state and action?</td><td>Stochastic: load noise, weather.</td></tr>
+      <tr><td>Episodic vs sequential</td><td>Does this action affect later decisions?</td><td>Sequential: heat stored now is heat later.</td></tr>
+      <tr><td>Static vs dynamic</td><td>Does the world change while the agent deliberates?</td><td>Dynamic: the hall heats up while we think.</td></tr>
+      <tr><td>Discrete vs continuous</td><td>States, time, percepts, actions?</td><td>Continuous temperature and load; we discretized time (10 min) and actions (0 to 10).</td></tr>
+      <tr><td>Known vs unknown</td><td>Does the agent know the rules?</td><td>Partly: the physics is known in form, the constants are not (step 8).</td></tr></table>
+      <p>Classify four other industrial agents below.</p>`,
+    ask: `<div class='a'>Debates worth having: a chess engine is fully observable and deterministic yet still hard (the state space, not the uncertainty). A warehouse robot is multiagent because other robots block its path. Semidynamic: the world is static but the clock runs.</div>
+      <div class='a'>Before the quiz, run the four demos on our own hall: the sensor dots (partially observable), the forced hour of cooling whose effect lasts past 08:00 (sequential), five noise draws (stochastic) and the slow decider (dynamic). The "Zero sensor noise" edge case is the good question: with a perfect thermometer, is the hall fully observable? No: the future load and weather are still hidden.</div>
+      <div class='a'>The quiz is submitted: students write their name and team at the top, answer the 24 cards without feedback, then press Submit (once per device). Only then do the cards show right or wrong with the reason, and their score. The results are private: open the leaderboard, unlock Admin (TA) with the token, and see "Class activities: Lab 1 step 2 quiz" (names, scores, and how the class answered each card). All 24 answers with reasons are in the cheat sheet (Lab 1, step 2) for the discussion.</div>`,
+    mount() {
+      const d = day(101), U = () => agents.utility(UDEF), base = run(U(), d);
+      const override = () => { const a = U(); const f = (per) => { const u = a(per); return per.t >= 36 && per.t < 42 ? 10 : u; }; f.reset = a.reset; return f; };
+      const slow = () => { const a = U(); let held = 2; const f = (per) => { const u = a(per); if (per.t % 3 === 0) held = u; return held; }; f.reset = () => { held = 2; a.reset(); }; return f; };
+      const cv = canvas(760, 300), legend = h("div", { class: "legend" }), box = sayBox();
+      const truth = { T: base.T, color: "--ink", width: 2.2 };
+      let st = { lines: [truth] };
+      const draw = () => drawTemps(cv, st);
+      const leg = (...items) => { legend.innerHTML = ""; items.forEach(([c, t]) => legend.append(h("span", {}, h("i", { style: `background:${c}` }), t))); };
+      leg(["var(--ink)", "true inlet temperature (utility agent, day 101)"], ["rgba(238,138,132,.6)", "above the 27 °C limit"]); draw(); onTheme(draw);
+      const ex = exampleBox([
+        { label: "Partially observable: what the sensor shows", note: "The bold line is the true inlet temperature. The gray dots appear one by one: they are all the agent gets.",
+          run: async () => { st = { lines: [truth], dots: base.Tm, dotsUpto: 0 }; leg(["var(--ink)", "true inlet temperature"], ["rgba(140,152,172,.8)", "sensor readings"]); await tween(3200, (k) => { st.dotsUpto = Math.round(k * (STEPS - 1)); draw(); }); let g = 0, tg = 0; base.T.forEach((v, t) => { const e = Math.abs(base.Tm[t] - v); if (e > g) { g = e; tg = t; } }); box.say(`The largest gap between reading and truth today is ${fmt(g, 2)} °C, at ${hhmm(tg)}. The agent never sees the bold line, and it never sees the load of the next hour unless the schedule tells it.`); } },
+        { label: "Sequential: one hour of full cooling", note: "Someone forces the cooling to level 10 from 06:00 to 07:00, then hands control back to the agent. Watch the blue line split from the bold one and stay apart after 07:00.",
+          run: async () => { const pert = run(override(), d), alt = { T: base.T.slice(), color: "--lagoon", width: 2.2 }; st = { lines: [truth, alt], cursorLabel: (t) => `${hhmm(t)}  gap ${fmt(pert.T[t] - base.T[t], 2)} °C` }; leg(["var(--ink)", "normal day"], ["var(--lagoon)", "full cooling forced from 06:00 to 07:00"]); await tween(1400, (k) => { alt.T = base.T.map((v, t) => v + (pert.T[t] - v) * k); draw(); }); await tween(4500, (k) => { st.cursor = Math.round(k * (STEPS - 1)); draw(); }); st.cursor = null; draw(); box.say(`At 07:00 the forced hall is ${fmt(base.T[42] - pert.T[42], 1)} °C colder. At 08:00, an hour after the override ended, the gap is ${fmt(base.T[48] - pert.T[48], 1)} °C, because the cooling units ramp down slowly. One action changed the state for hours, so decisions cannot be judged one at a time.`); } },
+        { label: "Stochastic: five noise draws", note: "Same day, same agent; only the random sensor noise changes. Each blue line is one possible day.",
+          run: async () => { st = { lines: [truth] }; leg(["var(--ink)", "the day above"], ["var(--lagoon)", "same day, different sensor noise"]); const out = []; for (let k = 1; k <= 5; k++) { const r = RNG(9000 + k), lg = run(U(), { ...d, noise: d.noise.map(() => r.normal(0, 0.3)) }), L = { T: lg.T, color: "--lagoon", alpha: 0.6, upto: 0 }; out.push(lg); st.lines.push(L); await tween(700, (q) => { L.upto = Math.round(q * (STEPS - 1)); draw(); }); } const pk = out.map((l) => l.peak); box.say(`Peaks over the five runs: from ${fmt(Math.min(...pk), 2)} to ${fmt(Math.max(...pk), 2)} °C. Costs: ${out.map((l) => fmt(l.cost, 0)).join(", ")} SAR. The next state is not fixed by the state and the action alone.`); } },
+        { label: "Zero sensor noise", kind: "edge", note: "Shrink the sensor noise to nothing. The dots fall onto the bold line. Is the hall now fully observable?",
+          run: async () => { const zero = run(U(), { ...d, noise: new Array(STEPS).fill(0) }), line2 = { T: base.T, color: "--ink", width: 2.2 }; st = { lines: [line2], dots: base.Tm.slice() }; leg(["var(--ink)", "true inlet temperature"], ["rgba(111,124,144,.7)", "sensor readings"]); await tween(1800, (k) => { st.dots = base.T.map((v, t) => v + (base.Tm[t] - v) * (1 - k)); draw(); }); await tween(900, (k) => { line2.T = base.T.map((v, t) => v + (zero.T[t] - v) * k); st.dots = line2.T; draw(); }); box.say(`With a perfect sensor: ${res(zero)}. With the noisy one: ${res(base)}. The readings are now exact, but the agent still cannot see the load or the weather an hour ahead, so the hall stays partially observable.`, "edge"); } },
+        { label: "Deliberating for 30 minutes", kind: "edge", note: "The same agent, but each decision takes 30 minutes, so the level can change only every third step. The hall keeps changing while it thinks: watch the purple line.",
+          run: async () => { const sl = run(slow(), d), alt = { T: base.T.slice(), color: "#8f7fe8", width: 2.2 }; st = { lines: [truth, alt] }; leg(["var(--ink)", "decides every 10 minutes"], ["#8f7fe8", "decides every 30 minutes"]); await tween(1500, (k) => { alt.T = base.T.map((v, t) => v + (sl.T[t] - v) * k); draw(); }); box.say(`Deciding every 10 minutes: ${res(base)}. Deciding every 30 minutes: ${res(sl)}. The environment is dynamic: thinking time has a price.`, "edge"); } },
+      ], box);
+      const O = { obs: ["Fully observable", "Partially observable"], ag: ["Single agent", "Multiagent"], det: ["Deterministic", "Stochastic"], ep: ["Episodic", "Sequential"], st: ["Static", "Semidynamic", "Dynamic"], dc: ["Discrete", "Continuous"] };
+      /* one card per property; every card has its own answer and its own reason. key: the short label stored with a submission */
+      const PROP = { obs: "Observable", ag: "Agents", det: "Deterministic", ep: "Episodic", st: "Static", dc: "Discrete" };
+      const mk = (name, props) => Object.entries(O).map(([k, opts]) => ({ q: `${name}: ${opts.join(" / ")}`, key: `${name.split(" (")[0]} · ${PROP[k]}`, options: opts, answer: props[k][0], why: props[k][1] }));
+      const qz = quiz([
+        ...mk("Warehouse picking robot (fulfillment center)", {
+          obs: ["Partially observable", "Its cameras see only the aisle in front of it. Shelves hide other robots and people around the corner, and it cannot see inside closed bins."],
+          ag: ["Multiagent", "Other robots and human pickers share the aisles. Their routes block or free its path, so their choices change how well it does."],
+          det: ["Stochastic", "A person can step into the aisle, an item can slip from the gripper, a wheel can slip: the same action does not always lead to the same next state."],
+          ep: ["Sequential", "The route it takes now decides where it is for the next pick. One detour delays every order after it."],
+          st: ["Dynamic", "Robots and people keep moving while it plans its path, so a slow plan is already out of date when it starts driving."],
+          dc: ["Continuous", "Position, speed and arm angles are real numbers that change smoothly over time."],
+        }),
+        ...mk("Defect-detection camera on a bottling line", {
+          obs: ["Fully observable", "The photo of the bottle in front of the lens holds everything needed to judge that bottle: cracks, fill level and cap are all visible."],
+          ag: ["Single agent", "It inspects alone. Nothing else on the line chooses actions that change how well it classifies."],
+          det: ["Deterministic", "The bottle does not change because the camera looked at it, and the image fully decides the verdict. What comes next (the next bottle) does not depend on the verdict."],
+          ep: ["Episodic", "Each bottle is a separate episode: rejecting this one does not change the next bottle or the next decision."],
+          st: [["Static", "Semidynamic"], "Static: nothing in the photo changes while it decides. Semidynamic is also accepted: the line keeps moving, so a slow decision misses the reject gate. Time is penalized, but the image itself does not change."],
+          dc: ["Continuous", "Pixel brightness and the size and position of a defect are measurements on a continuous scale, even if the camera stores them with many discrete levels."],
+        }),
+        ...mk("Cloud autoscaler (adds or removes servers)", {
+          obs: ["Partially observable", "It sees the current CPU load and request rate, but not the traffic of the next hour or why a spike started."],
+          ag: [["Single agent", "Multiagent"], "Single agent is the usual answer: the users are part of the environment. Multiagent is also accepted: other customers' autoscalers compete for the same machines, and attackers may try to trigger useless scaling."],
+          det: ["Stochastic", "Traffic comes from users it cannot predict exactly, so the same scaling action can meet very different load."],
+          ep: ["Sequential", "A server started now takes minutes to boot and is paid for afterwards, so each decision limits and shapes the next ones."],
+          st: ["Dynamic", "Requests keep arriving while it decides. Waiting is itself a choice, and it drops traffic."],
+          dc: [["Discrete", "Continuous"], "Discrete: the action is a whole number of servers. Continuous is also accepted: load, latency and time are continuous, and many designs treat capacity as a real number."],
+        }),
+        ...mk("Oil-well pump controller", {
+          obs: ["Partially observable", "It measures pressure and flow at the surface and at a few places down the well; the reservoir itself is never seen."],
+          ag: ["Single agent", "One controller runs the pump. The reservoir and the fluid are the environment: they react, but they have no goals of their own."],
+          det: ["Stochastic", "Gas pockets, sand and changes in the reservoir make the response to the same pump speed differ from day to day."],
+          ep: ["Sequential", "Pumping too hard now lowers the reservoir pressure and can damage the well, which limits what the pump can do later."],
+          st: ["Dynamic", "Pressure and flow keep changing while the controller computes its next setting."],
+          dc: ["Continuous", "Pump speed, pressure and flow rate are real numbers that change continuously."],
+        }),
+      ], { reveal: false, submit: { lab: "L1", id: "properties" }, onChange: (s) => m.update(s) });   // called after mount, once m exists
+      const m = mission({
+        goal: "Classify four industrial agents on all six properties, submit your answers, and get at least <b>20 of 24</b> right.",
+        how: [
+          "Use the four demos on our hall below (sensor, sequential, stochastic, slow decider) to see what each property means in practice.",
+          "Write your name and team above the cards.",
+          "Pick a value in each of the 24 cards. There is no feedback yet: think each one through.",
+          "Press <b>Submit my answers</b> (only once). Then every card shows whether you were right and why, and your score appears under the cards.",
+        ],
+        targets: [
+          { text: "Answer all 24 cards", test: (s) => s.answered === 24 },
+          { text: "Submit your answers", test: (s) => s.submitted },
+          { text: "At least 20 of 24 right", test: (s) => s.submitted && s.correct >= 20 },
+        ],
+      });
+      return h("div", {}, m, h("h3", {}, "Our hall, property by property"), h("div", { class: "lab" }, h("div", { class: "controls" }, ex, box), h("div", { class: "stage" }, cv, legend)), h("h3", {}, "Classify four other industrial agents"), qz);
+    },
+  });
+
+  steps.push({
+    id: "beat", title: "Beat the agent: plan a day by hand", time: 10,
+    mission: true,
+    theory: `<h3>Open-loop control: a human plan</h3>
+      <p>You are the night operator. Set the cooling level for each 2-hour block, then run the day. You can see the load, the outside temperature and the scheduled batch job, like the agent will. Keep the inlet below 27 °C and stay within the day's budget. Your plan is <b>open loop</b>: it does not react to the temperature. That is the first thing an agent fixes.</p>`,
+    ask: `<div class='a'>Let the class shout levels block by block. After the run ask: where did it fail? (the job, the afternoon heat). Then ask what they would want to know to do better: the current temperature. That is feedback, step 4.</div>
+      <div class='a'>Mission, measured on day 131 (best possible cost 3,157 SAR, so the budget is 3,480 SAR; the plan is evaluated on every slider change, the Run button replays it). Lowest flat plan with zero minutes: level 5 everywhere (3,815 SAR, 335 over budget); level 4 everywhere gives 510 minutes above the limit. Within budget: 3,3,3,6,4,6,4,5,5,4,4,3 (3,363 SAR, 117 under). At least 200 under: start from 5 everywhere and lower one block at a time while the minutes stay at 0; this greedy search ends at 3,4,4,4,4,4,4,5,5,5,4,3 with 3,228 SAR, 252 SAR under budget. No example meets a target: all four end over budget.</div>
+      <div class='a'>Examples: "A flat plan: level 4 all day" fails badly (510 minutes above the limit, 50,519 SAR over budget). "The omniscient plan squeezed into 2-hour blocks": the real omniscient agent is the best (3,157 SAR) because it changes the level every 10 minutes (72 changes, levels 0 to 10). Twelve sliders cannot follow that timing: its block averages rounded down give 1,180 minutes above the limit, rounded to nearest 370 minutes, rounded up (the example) 3,618 SAR, 138 over budget. The best possible 12-block plan is 1,2,2,6,4,5,4,5,5,5,4,3 at 3,212 SAR (268 under, only 55 SAR above the omniscient agent): good students get close to it with the greedy search. The two edge cases bracket the trade-off: everything off (1,330 minutes above the limit, 129,550 over) and full blast (no violation but 5,362 over).</div>`,
+    mount() {
+      const levels = new Array(12).fill(4), d = day(131), budget = budgetOf(d); let bestCost = Infinity;
+      const rc = costReceipt(), view = rc.attach(dayView("▶ Replay", rc.hooks)), out = h("div", { class: "metrics" }), box = sayBox(), mine = h("p", { class: "note" });
+      const m = mission({
+        goal: "Write a cooling plan for day 131 that stays within the day's budget of <b>3,480 SAR</b>, and then ends at least <b>200 SAR under budget</b>.",
+        how: [
+          "Read the chart first: the purple band is the batch job (08:40 to 10:10, +2 MW) and the outside temperature (orange) peaks in the afternoon.",
+          "The twelve sliders under <b>Your controls</b> are the cooling level for each 2-hour block. Every change is simulated at once; the red bands, the cost and the budget line update immediately. <b>Run my plan</b> replays the day with the cost receipt.",
+          "Drag all twelve sliders to the same level and find the lowest level that gives 0 minutes above 27 °C. It is safe, but over budget.",
+          "From there, lower one slider by one step at a time. If red appears, put it back and try the next block. Night blocks (00:00 to 06:00) are the cheapest to lower; the blocks around the job and the afternoon need more.",
+          "Keep going until no single step down stays at 0 minutes. Watch the cost fall under the budget, then 200 SAR under it.",
+        ],
+        targets: [
+          { text: "The lowest flat plan (same level in every block) with zero minutes above 27 °C", test: (s) => s.levels.every((x) => x === s.levels[0]) && s.levels[0] <= 5 && s.log.viol === 0 },
+          { text: "Within the day's budget (3,480 SAR)", test: (s) => s.log.cost <= s.budget },
+          { text: "At least 200 SAR under budget", test: (s) => s.budget - s.log.cost >= 200 },
+        ],
+      });
+      const verdict = (l) => vsBudget(budget - l.cost);
+      function evaluate() {
+        const log = run((per) => levels[Math.min(11, Math.floor(per.t / 12))], d); bestCost = Math.min(bestCost, log.cost);
+        view.set(d, log);
+        setMetrics(out, [["Budget today (SAR)", fmt(budget, 0)], ["Your cost (SAR)", fmt(log.cost, 0), log.cost <= budget ? "good" : "bad"], [log.cost <= budget ? "Under budget by (SAR)" : "Over budget by (SAR)", fmt(Math.abs(budget - log.cost), 0), log.cost <= budget ? "good" : "bad"], ["Minutes above 27 °C", log.viol * 10, log.viol ? "bad" : "good"], ["Energy (MWh)", fmt(log.energy / 1000, 2)], ["Your best so far (SAR)", fmt(bestCost, 0)]]);
+        mine.innerHTML = `<b>Your plan:</b> ${levels.join(", ")} → ${log.viol * 10} minutes above 27 °C, cost ${fmt(log.cost, 0)} SAR, ${verdict(log)}.`;
+        if (!demo) m.update({ log, levels: levels.slice(), budget });
+        return log;
+      }
+      const sliders = levels.map((v, i) => range({ label: `${String(i * 2).padStart(2, "0")}:00 to ${String(i * 2 + 2).padStart(2, "0")}:00`, min: 0, max: 10, step: 1, value: v, onchange: (x) => { levels[i] = x; evaluate(); } }));
+      async function runPlan() { const log = evaluate(); await view.play(4500, 0); return log; }
+      evaluate();
+      const setPlan = async (vals) => { for (let i = 0; i < 12; i++) await sliders[i].animateTo(vals[i], 180); };
+      const omni = refLog(d).u, omniPlan = Array.from({ length: 12 }, (_, b) => Math.ceil(mean(omni.slice(b * 12, b * 12 + 12))));   // block averages, rounded up as a safety margin
+      const ex = exampleBox([
+        { label: "A flat plan: level 4 all day", note: "The sliders move to 4, then the day replays. Watch the afternoon: the load and the outside heat rise, the plan does not.",
+          run: async () => { await setPlan(new Array(12).fill(4)); const l = await runPlan(); box.say(`Level 4 all day: ${res(l)}, ${verdict(l)}.`); } },
+        { label: "The omniscient plan squeezed into 2-hour blocks", note: "The omniscient agent changes the level every 10 minutes. The sliders allow one level per 2 hours, so they move to its average level in each block, rounded up (rounding down overheats the hall). Watch the level rise ahead of the batch job and the afternoon heat.",
+          run: async () => { await setPlan(omniPlan); const l = await runPlan(); const o = refLog(d); box.say(`The real omniscient agent costs ${fmt(o.cost, 0)} SAR today: the best possible. Squeezed into 2-hour blocks (${omniPlan.join(", ")}) it gives ${res(l)}, ${verdict(l)}. One level per block loses its exact timing, and rounding up to stay safe wastes money. A careful hand plan can do better than this copy.`); } },
+        { label: "Everything off", kind: "edge", note: "All twelve blocks at level 0: the cheapest electricity bill possible. Watch what the penalty does to the total.",
+          run: async () => { await setPlan(new Array(12).fill(0)); const l = await runPlan(); box.say(`Cooling off: ${res(l)}, energy ${fmt(l.energy / 1000, 2)} MWh, ${verdict(l)}. The penalties dwarf any saving on electricity.`, "edge"); } },
+        { label: "Full blast all day", kind: "edge", note: "All twelve blocks at level 10: no risk at all. Watch the temperature sink far below the limit while the bill grows.",
+          run: async () => { await setPlan(new Array(12).fill(10)); const l = await runPlan(); box.say(`Full blast: ${res(l)}, energy ${fmt(l.energy / 1000, 2)} MWh, ${verdict(l)}. Zero violations is not the same as a good controller.`, "edge"); } },
+      ], box);
+      const runBtn = h("button", { onclick: () => runPlan() }, "Run my plan");
+      return h("div", {}, m, h("div", { class: "lab" },
+        h("div", { class: "controls" }, h("h3", { style: "margin:0" }, "Your controls"), h("p", { class: "note", style: "margin:0" }, "Cooling level for each 2-hour block of day 131 (0 = off, 10 = full)."), ...sliders, h("div", { class: "btns" }, runBtn), ex, box),
+        h("div", { class: "stage" }, view.el, rc.el, out, mine, h("p", { class: "note" }, BUDGET_NOTE))));
+    },
+  });
+
+  steps.push({
+    id: "reflex", title: "Agent 1: simple reflex (the thermostat)", time: 15,
+    mission: true,
+    theory: `<h3>Condition-action rules on the current percept only</h3>
+      <pre>if temperature &gt; T_set: fans = HIGH
+else:                  fans = LOW</pre>
+      <p>In words: every 10 minutes the agent reads the inlet sensor. If the reading is above <b>T_set</b>, it sets the cooling to the level <b>HIGH</b>; otherwise it sets it to the level <b>LOW</b>. Those are the three sliders you control. Nothing else goes into the decision: no memory, no forecast, no price.</p>
+      <p>A simple reflex agent has no memory and no model: it maps the current percept straight to an action. It is correct only when the current percept contains everything that matters. Here it does not. The cooling units take about an hour to ramp and the hall stores heat, so by the time the sensor says "hot" it is too late, and by the time it says "cold" the cooling is still running hard. On the chart, the thin steps in the bottom panel are the level the rule commands (they jump between LOW and HIGH), and the blue area is the level the cooling units have actually reached. Watch the sawtooth in the top panel: it overshoots the limit, then overcools, and the noisy sensor makes the command flicker.</p>
+      <p>Before agent programs the lecture mentions the <b>table-driven agent</b>: a lookup table from percept sequences to actions. With a few hundred possible readings, loads and prices, and 144 steps a day, the table would be astronomically large. Rules replace tables; models replace rules.</p>`,
+    ask: `<div class='a'>Ask: "What T_set would you pick?" Low enough to avoid violations wastes energy all day. Then switch on a heat wave: the same rule now violates. Ask why: the rule cannot know that today the outside heat load is bigger. A reflex agent cannot adapt to what it does not perceive.</div>
+      <div class='a'>Measured on day 101: with HIGH 8 no T_set from 20 to 28 reaches zero violations (best 60 minutes, at T_set 20 or 20.5). With HIGH 10, T_set 22.5 is the highest with zero violations. The edge case "HIGH equals LOW" turns the rule into open-loop control; "T_set at the limit" shows why reacting at 27 °C is already too late.</div>
+      <div class='a'>Mission, measured on day 101 (budget 4,150 SAR; examples never tick targets, and no example ends on a setting that meets one): zero minutes has 296 solutions, for example T_set 22, HIGH 10, LOW 2. Within budget: 22.5/10/2 (4,080 SAR, 70 under), 22/10/1 (4,101, 49 under), 22/10/2 (4,131, 19 under). Over the 10 practice days the best money left in a search over T_set 20 to 25, HIGH 8 to 10 and LOW 0 to 4 is −1,337 SAR (22/10/1), then −1,475 (22/10/2) and −1,859 (21.5/10/2): a thermostat cannot stay within budget, so the target is a loss smaller than 2,000 SAR. Breaking a safe rule: 22.5/10/2 fails with a 2 °C heat wave (10 minutes) and with 4 °C (100 minutes). The examples end at 100 minutes above the limit (T_set 22, HIGH 8), 50 (T_set 23, HIGH 10), 160 (the defaults), 920 (HIGH = LOW) and 420 (T_set 27), all over budget and losing at least 13,000 SAR over 10 days; the heat-wave edge starts from a rule that already has 10 minutes on a normal day (23.5/10/1, 80 minutes at +6 °C).</div>`,
+    mount: () => agentStep({
+      make: (p) => agents.reflex(p.tset, p.uhigh, p.ulow),
+      params: [{ key: "tset", label: "T_set (°C)", min: 20, max: 28, step: 0.5, default: 24, fmt: (v) => v.toFixed(1) }, { key: "uhigh", label: "HIGH level", min: 0, max: 10, step: 1, default: 8 }, { key: "ulow", label: "LOW level", min: 0, max: 10, step: 1, default: 2 }],
+      heat: true,
+      help: "<b>T_set</b>: the sensor reading above which the rule switches to HIGH. <b>HIGH</b>: cooling level used when the reading is above T_set. <b>LOW</b>: cooling level used otherwise. <b>Heat wave</b>: makes the outside air hotter all day. Every change is simulated at once on day 101.",
+      mission: {
+        goal: "Tune the thermostat so day 101 has <b>zero minutes above 27 °C</b> and stays <b>within its budget</b> (4,150 SAR), lose less than <b>2,000 SAR</b> of budget over the 10 practice days, then break your own safe rule with a heat wave.",
+        how: [
+          "Look at the chart with the starting rule: the red bands appear when the purple batch jobs arrive. HIGH 8 cannot remove that much heat.",
+          "Drag <b>HIGH level</b> up to 10, so the rule cools hard whenever it reads \"hot\".",
+          "Drag <b>T_set</b> down in 0.5 steps (23, 22.5, 22) and watch <b>Minutes above 27 °C</b> under the chart. A lower T_set is safer but costs more.",
+          "Fine-tune with <b>LOW level</b> (try 1, 2, 3): it decides how much the quiet hours cost. Keep the minutes at 0 and watch <b>Under budget by</b> appear, then check <b>Money left over 10 days</b> (a reflex rule cannot stay fully within budget, so aim for a loss under 2,000 SAR).",
+          "With a safe rule on the sliders, drag <b>Heat wave</b> up from 0 one degree at a time without touching the rule, until red bands come back.",
+        ],
+        targets: [
+          { text: "Zero minutes above 27 °C on day 101 (no heat wave)", test: (s) => s.heat === 0 && s.log.viol === 0 },
+          { text: "Zero minutes on day 101 and within its budget (no heat wave)", test: (s) => s.heat === 0 && s.log.viol === 0 && s.left >= 0 },
+          { text: "Lose less than 2,000 SAR of budget over the 10 practice days (no heat wave)", test: (s) => s.heat === 0 && s.ev.left > -2000 },
+          { text: "A heat wave breaks a rule that is safe on a normal day", test: (s) => s.heat > 0 && s.log.viol > 0 && run(agents.reflex(s.p.tset, s.p.uhigh, s.p.ulow), day(101)).viol === 0 },
+        ],
+      },
+      examples: (A) => [
+        { label: "Lower T_set from 26 to 22", note: "Watch the red bands above the limit shrink while the energy rises. A lower T_set buys safety with electricity.",
+          run: async () => { const a = (await A.reset({ tset: 26 })).log; const b = (await A.glide("tset", 22, 2200)).log; A.say(`T_set 26: ${res(a)}, energy ${fmt(a.energy / 1000, 2)} MWh. T_set 22: ${res(b)}, energy ${fmt(b.energy / 1000, 2)} MWh.${b.viol ? " Even at 22 the rule still crosses the limit: HIGH = 8 is not enough cooling when the batch jobs arrive." : ""}`); } },
+        { label: "More power: HIGH 8 to 10", note: "Same rule at T_set 23, but the HIGH level grows from 8 to 10. Watch the afternoon red bands shrink.",
+          run: async () => { const a = (await A.reset({ tset: 23 })).log; const b = (await A.glide("uhigh", 10, 1200)).log; A.say(`HIGH 8: ${res(a)}. HIGH 10: ${res(b)}. More power helps, but at T_set 23 the rule still reacts too late.`); } },
+        { label: "Play the sawtooth", note: "Watch the commanded level (thin steps, bottom panel) jump between HIGH and LOW each time the noisy reading crosses T_set, while the cooling units (blue) lag behind.",
+          run: async () => { const r = await A.reset(); await A.view.play(9000, 0); A.say(`The command switched direction ${turns(r.log.u)} times today. ${res(r.log)}.`); } },
+        { label: "Heat wave on a nearly safe rule", kind: "edge", note: "T_set 23.5, HIGH 10, LOW 1 spends only 10 minutes above the limit on a normal day. Now the outside air gets 6 °C hotter. Watch the red bands grow: the rule has no way to know the day is different.",
+          run: async () => { const a = (await A.reset({ tset: 23.5, uhigh: 10, ulow: 1 })).log; const b = (await A.glide("heat", 6, 1500)).log; A.say(`Normal day: ${res(a)}. Heat wave +6 °C: ${res(b)}. Same rule, same T_set.`, "edge"); } },
+        { label: "HIGH equals LOW", kind: "edge", note: "With HIGH = LOW = 2 both branches of the rule give the same action, so the percept no longer matters. Watch the temperature run off the top of the chart.",
+          run: async () => { await A.reset(); const b = (await A.glide("uhigh", 2, 1500)).log; A.say(`${res(b)}, peak ${fmt(b.peak, 1)} °C (the chart stops at 32 °C). A rule whose two branches agree is open-loop control: it ignores what it perceives.`, "edge"); } },
+        { label: "T_set at the limit (27 °C)", kind: "edge", note: "The rule now waits until the reading is at the limit before it cools. Watch each warm spell overshoot: the cooling units need about an hour to catch up.",
+          run: async () => { const a = (await A.reset()).log; const b = (await A.glide("tset", 27, 1500)).log; A.say(`T_set 24: ${res(a)}. T_set 27: ${res(b)}. Reacting at the limit is reacting too late.`, "edge"); } },
+      ],
+    }),
+  });
+
+  steps.push({
+    id: "model", title: "Agent 2: model-based reflex", time: 15,
+    mission: true,
+    theory: `<h3>Keep an internal state, use a model</h3>
+      <p>A model-based reflex agent maintains an <b>internal state</b> from the percept history and updates it with two pieces of knowledge: a <b>sensor model</b> (how percepts relate to the true state) and a <b>transition model</b> (how the world evolves and how actions change it). Ours keeps a filtered temperature, its slope, and its own last command:</p>
+      <pre>T_filtered  = 0.5 × T_filtered + 0.5 × sensor        # sensor model: average out the noise
+slope       = T_filtered − previous T_filtered       # how fast the hall is heating
+T_predicted = T_filtered + slope × horizon           # transition model: where we are heading
+command     = command + K × (T_predicted − target)   # adjust the level, do not jump</pre>
+      <p>The dashed line is the agent's belief: its predicted temperature. It acts on that instead of the raw reading, so it starts cooling before the limit is hit and stops before it overcools. Try horizon 0 (pure feedback) against 3 and 6; try a gain K that is too high.</p>`,
+    ask: `<div class='a'>Ask which part is the state (filtered temperature, slope, last command) and which is the model (prediction from the slope). Then show it is still blind to the future: it reacts to the batch job only once the temperature starts climbing. Ask what information it is ignoring (the schedule).</div>
+      <div class='a'>Use "Look further ahead" to show the dashed belief running ahead of the bold line, and "Play: belief against truth" to narrate one hour at a time. The edge case "Gain too high" counts how often the command changes direction: the count rises with K, which is the oscillation the deeper box explains. "Target just under the limit" gives 360 minutes above 27 °C on day 101.</div>
+      <div class='a'>Mission, measured on day 101 (examples never tick targets): zero minutes with target 23, K 1.5, horizon 5 (3,979 SAR) or target 22, K 4, horizon 4. A loss under 1,500 SAR over the 10 practice days: 22.5/4/4 (−628 SAR), 22/4/4 (−1,114), 21.5/1.5/8 (−1,306); no setting stays within budget on all 10 days. 40 or more direction changes: target 24, K 1.5, horizon 7 (46) or horizon 8 (52), K 1.4, horizon 6 (42); 105 settings at target 24 reach it. The examples end at 34 (horizon 6), 32 (K 4), 16 (defaults) and 14 (target 26.5) direction changes, lose at least 35,000 SAR over 10 days, and none of them has zero minutes on day 101.</div>`,
+    mount: () => agentStep({
+      make: (p) => agents.model(p.target, p.K, p.horizon),
+      params: [{ key: "target", label: "Target (°C)", min: 20, max: 26.5, step: 0.5, default: 24, fmt: (v) => v.toFixed(1) }, { key: "K", label: "Gain K", min: 0.2, max: 4, step: 0.1, default: 1.5, fmt: (v) => v.toFixed(1) }, { key: "horizon", label: "Prediction horizon (steps of 10 min)", min: 0, max: 8, step: 1, default: 3 }],
+      help: "<b>Target</b>: the temperature the agent tries to hold. <b>Gain K</b>: how many cooling levels it adds per degree of predicted error. <b>Prediction horizon</b>: how many 10-minute steps ahead it extrapolates the current trend (the dashed line). Every change is simulated at once on day 101.",
+      more: (log) => `; the command changed direction ${turns(log.u)} times`,
+      mission: {
+        goal: "Make the model-based agent keep day 101 at <b>zero minutes above 27 °C</b>, lose less than <b>1,500 SAR</b> of budget over the 10 practice days, and find settings where its command oscillates.",
+        how: [
+          "Watch the dashed blue line in the top panel: it is the agent's predicted temperature. The agent acts on it, not on the gray sensor dots.",
+          "Drag <b>Prediction horizon</b> to 5: the prediction runs further ahead, so cooling starts before the hall heats up.",
+          "Drag <b>Target</b> down to 23: the agent aims lower and keeps a margin for the batch jobs it cannot see coming. Watch <b>Minutes above 27 °C</b> reach 0.",
+          "For the 10 days, drag <b>Target</b> to 22 or 22.5 and try <b>Gain K</b> between 2 and 4 with a horizon of 4 to 8; watch <b>Money left over 10 days</b> climb toward zero.",
+          "For the oscillation, set the target back to 24 and drag the horizon to 7 or 8: the extrapolated noise makes the command (thin steps, bottom panel) slam up and down. The count is in the line under the chart.",
+        ],
+        targets: [
+          { text: "Zero minutes above 27 °C on day 101", test: (s) => s.log.viol === 0 },
+          { text: "Lose less than 1,500 SAR of budget over the 10 practice days", test: (s) => s.ev.left > -1500 },
+          { text: "Make it oscillate: the command changes direction 40 times or more on day 101", test: (s) => turns(s.log.u) >= 40 },
+        ],
+      },
+      extra: (log, p) => { const pred = []; let Tf = null, Tp = null; for (let t = 0; t < STEPS; t++) { Tf = Tf === null ? log.Tm[t] : 0.5 * Tf + 0.5 * log.Tm[t]; const slope = Tp === null ? 0 : Tf - Tp; Tp = Tf; pred.push(Tf + slope * p.horizon); } return pred; },
+      examples: (A) => [
+        { label: "Look further ahead: horizon 0 to 6", note: "The dashed line is the agent's prediction. At horizon 0 it is just the filtered reading; as the horizon grows it runs ahead of the bold line whenever the hall heats or cools.",
+          run: async () => { const a = await A.reset({ horizon: 0 }); const b = await A.glide("horizon", 6, 2000); A.say(`Money left over 10 days: ${signed(a.ev.left)} SAR at horizon 0, ${signed(b.ev.left)} SAR at horizon 6. Today: ${res(a.log)} at horizon 0, ${res(b.log)} at horizon 6.`); } },
+        { label: "Play: belief against truth", note: "Follow the cursor: the dashed prediction moves first, the command follows, and the true temperature (bold line) follows last.",
+          run: async () => { const r = await A.reset(); await A.view.play(9000, 0); A.say(`${res(r.log)}. The prediction only extrapolates the slope, so the batch job still surprises it.`); } },
+        { label: "Gain too high: K 1.5 to 4", kind: "edge", note: "A large K reacts hard to every predicted error, and the cooling units' one-hour lag makes it overshoot. Watch the bottom panel: the command starts swinging between extremes.",
+          run: async () => { const a = (await A.reset()).log; const b = (await A.glide("K", 4, 1600)).log; A.say(`The command changed direction ${turns(a.u)} times at K 1.5 and ${turns(b.u)} times at K 4. Today: ${res(a)} at K 1.5, ${res(b)} at K 4.${b.viol <= a.viol ? " Fewer violations today, bought with a command that keeps slamming between extremes: real cooling units and fans wear out under that." : ""}`, "edge"); } },
+        { label: "Target just under the limit (26.5 °C)", kind: "edge", note: "A target 0.5 °C under the limit leaves no room for noise and overshoot. Watch the bold line cross the dashed limit.",
+          run: async () => { const a = (await A.reset()).log; const b = (await A.glide("target", 26.5, 1500)).log; A.say(`Target 24: ${res(a)}. Target 26.5: ${res(b)}. A target needs a safety margin as large as the overshoot.`, "edge"); } },
+      ],
+    }),
+  });
+
+  steps.push({
+    id: "goal", title: "Agent 3: goal-based (pre-cool for the batch job)", time: 15,
+    mission: true,
+    theory: `<h3>Act on what the future requires</h3>
+      <p>A goal-based agent has a <b>goal</b> ("inlet air never above 27 °C, including when the scheduled batch job starts") and uses its model to work out which action now leads to the goal later. It looks ahead through the schedule, finds the largest load coming within its lookahead window, and computes from the transition model how much cooling that load will need:</p>
+      <pre>L_max    = largest load in the next LOOKAHEAD minutes (from the schedule)
+Q_needed = L_max + k_env × (T_outside − target)         # heat that must be removed
+command  = Q_needed / gain + K × (T_filtered − target)  # feed-forward from the goal, plus a small correction</pre>
+      <p>With a long enough lookahead the cooling is already up when the job starts, so the temperature barely moves. This is the lecture's message: goals plus a model let the agent choose actions by their <i>consequences</i>, which in general needs <b>search or planning</b>, the subject of the next lecture. Try lookahead 0 (no anticipation) vs 4 or 6 steps.</p>
+      <p>What a goal cannot do: say how much a bit more energy is worth against a bit more risk. It is binary. That is what utilities add.</p>`,
+    ask: `<div class='a'>Ask how far ahead the agent must look, given that the cooling units need about an hour to make most of a change. Measured on day 101 with target 24: lookahead 0 gives 120 minutes above the limit, and 6 steps (60 minutes) is the smallest lookahead with zero violations, the same as the ramp time. Then ask: "Is pre-cooling an hour early rational?" It avoids the violation but burns energy; the agent has no way to weigh that. Lead into utility.</div>
+      <div class='a'>Examples: "Lookahead 0 to 6" and "Slow motion through the batch job" (the replay stops an hour before the first job). Edge cases: K = 0 trusts the model blindly (70 minutes above the limit at target 24, lookahead 6), and a target of 26.5 leaves no margin.</div>
+      <div class='a'>Mission, measured on day 101 (budget 4,150 SAR; examples never tick targets): running cold instead of looking ahead also works, at a price: zero minutes with lookahead 3 or less, for example target 22, lookahead 3, K 1.5 (4,059 SAR, 91 under budget) or target 21, lookahead 0, K 1.5 (4,122 SAR). At least 280 SAR under budget: target 25.5, lookahead 7, K 1 (3,848 SAR, 302 under) or 26/8/0.5 (3,865, 285 under), cheaper than the utility agent's 3,905. Within budget on all 10 days with at least 1,800 SAR left: 26/8/0.5 (1,985 SAR), 25.5/7/1 (1,926), 25.5/8/1 (1,888). The examples end at target 24 with lookahead 6 (zero minutes but 191 SAR under budget and 562 SAR left over 10 days) or with violations, so none of them meets a target.</div>`,
+    mount: () => agentStep({
+      make: (p) => agents.goal(p.target, p.lookahead, p.K),
+      params: [{ key: "target", label: "Target (°C)", min: 20, max: 26.5, step: 0.5, default: 25, fmt: (v) => v.toFixed(1) }, { key: "lookahead", label: "Lookahead (steps of 10 min)", min: 0, max: 12, step: 1, default: 4 }, { key: "K", label: "Correction gain K", min: 0, max: 4, step: 0.1, default: 1.5, fmt: (v) => v.toFixed(1) }],
+      help: "<b>Target</b>: the temperature the agent plans to hold. <b>Lookahead</b>: how many 10-minute steps of the job schedule it reads ahead; it prepares for the largest load in that window. <b>Correction gain K</b>: how strongly it corrects with the thermometer when the plan is off. Every change is simulated at once on day 101.",
+      mission: {
+        goal: "Find two ways to keep day 101 at <b>zero minutes above 27 °C</b> (running cold, or looking ahead), then use the schedule to finish day 101 at least <b>280 SAR under budget</b> and stay <b>within budget on all 10 days</b> with at least 1,800 SAR left.",
+        how: [
+          "Drag <b>Lookahead</b> to 0: the agent learns of the purple batch job only when it starts, and the bold line crosses the dashed limit.",
+          "First way, run cold: keep the lookahead at 3 or less and drag <b>Target</b> down (23, 22.5, 22) until <b>Minutes above 27 °C</b> shows 0. Note the cost.",
+          "Second way, look ahead: drag the lookahead up step by step and watch the blue cooling level rise <i>before</i> the purple band. Now you can raise the target again.",
+          "To save money, run warmer with foresight: <b>Target</b> 25 to 26, <b>Lookahead</b> 7 or 8, <b>Correction gain K</b> 0.5 to 1. Keep the minutes at 0 and watch <b>Under budget by</b> grow past 280 SAR.",
+          "Check <b>Days within budget</b> and <b>Money left over 10 days</b>: good settings on day 101 should also hold on the other days.",
+        ],
+        targets: [
+          { text: "Zero minutes on day 101 with a lookahead of 3 steps or less (run cold)", test: (s) => s.log.viol === 0 && s.p.lookahead <= 3 },
+          { text: "At least 280 SAR under budget on day 101", test: (s) => s.left >= 280 },
+          { text: "Within budget on all 10 days, with at least 1,800 SAR left", test: (s) => s.ev.within === PRACTICE.length && s.ev.left >= 1800 },
+        ],
+      },
+      examples: (A) => [
+        { label: "Lookahead 0 to 6 (target 24)", note: "Watch the blue cooling level in the bottom panel start rising earlier, ahead of the purple batch-job band, as the lookahead grows.",
+          run: async () => { const a = (await A.reset({ target: 24, lookahead: 0 })).log; const b = (await A.glide("lookahead", 6, 2000)).log; A.say(`Lookahead 0: ${res(a)}. Lookahead 6 (one hour): ${res(b)}.`); } },
+        { label: "Slow motion through the batch job", note: "Target 24, lookahead 6. The replay stops an hour before the first job; watch the command step up while the temperature is still low, then crawl through the job.",
+          run: async () => { const r = await A.reset({ target: 24, lookahead: 6 }); const j0 = Math.min(...r.d.jobs.map((j) => j.start)), j1 = Math.max(...r.d.jobs.map((j) => j.end)); await A.view.play(5000, 0, Math.max(0, j0 - 6)); await sleep(1200); await A.view.play(40000, null, Math.min(STEPS - 1, j1 + 6)); A.say(`Command one hour before the job: ${r.log.u[Math.max(0, j0 - 6)]}; at the start of the job: ${r.log.u[j0]}. Peak during the jobs: ${fmt(Math.max(...r.log.T.slice(j0, j1)), 1)} °C.`); await A.view.play(5000); } },
+        { label: "No correction: K = 0", kind: "edge", note: "With K = 0 the agent trusts its model completely and ignores the thermometer. Any error in the steady-state calculation is never corrected.",
+          run: async () => { const a = (await A.reset({ target: 24, lookahead: 6 })).log; const b = (await A.glide("K", 0, 1500)).log; A.say(`K 1.5: ${res(a)}. K 0: ${res(b)}. Feed-forward alone is open loop again; a little feedback fixes what the model gets wrong.`, "edge"); } },
+        { label: "Target near the limit (26.5)", kind: "edge", note: "The goal is still 27 °C, but the agent aims only 0.5 °C below it. Watch the noise and the slow cooling units push it over.",
+          run: async () => { const a = (await A.reset({ target: 24, lookahead: 6 })).log; const b = (await A.glide("target", 26.5, 1500)).log; A.say(`Target 24: ${res(a)}. Target 26.5: ${res(b)}.`, "edge"); } },
+      ],
+    }),
+  });
+
+  steps.push({
+    id: "utility", title: "Agent 4: utility-based (cost vs risk)", time: 20,
+    mission: true,
+    theory: `<h3>Choose the action with the highest expected utility</h3>
+      <p>The utility function is the agent's internalized performance measure. Every 10 minutes the agent tries all 11 cooling levels, simulates each one over a short horizon with its model, and scores the outcome:</p>
+      <pre>for each level u in 0..10:
+    simulate H steps with the model (schedule, outside temp, price)
+    cost  = electricity for those steps (at the price of each hour)
+          + w_viol × 1000 SAR × P(temperature &gt; 27 °C)      # expected penalty, from the model
+          + w_wear × |u − previous u|                          # equipment wear from big swings
+    U(u) = −cost
+choose the u with the highest U</pre>
+      <p>Two things fall out of this that no earlier agent could do. It decides <b>how close to the limit to run</b>: w_viol is its risk aversion. With w_viol = 1 it is risk-neutral (it uses the true expected penalty); with 0 it is reckless; with 3 it is paranoid and overspends. And it prices every decision with the tariff of the hour, so it spends less cooling when electricity is expensive and more when it is cheap. The horizon H must cover the cooling units' ramp: with H = 3 the agent cannot see the consequences of its own actions and fails; with H = 6 (one hour) it works. Compare the bill with the goal-based agent.</p>`,
+    ask: `<div class='a'>Ask students to predict what happens at w_viol = 0 before you drag it. Then drag H to 3 and ask why a lookahead shorter than the cooling ramp is useless. Ask what a rational w_viol is when the performance measure is money (1.0: exactly the expected cost) and why a real operator might still choose 2 (a violation also costs reputation, not in the measure).</div>
+      <div class='a'>Measured on day 101: w_viol 0 gives 1,320 minutes above the limit (it switches the cooling off), H = 3 gives 460 minutes, H = 6 none. In an 8 °C heat wave H 6 gives 430 minutes while H 11 has none ("A heat wave of 8 °C"). Worth telling for the tournament: on practice day 110 (not shown on this page) H = 12 makes the agent give up. It assumes the peak load for two hours, every level looks doomed, the penalty term is the same for all of them, and it picks level 0 (460 minutes above the limit; H = 11 has none). A utility that saturates stops guiding the choice.</div>
+      <div class='a'>Mission, measured on day 101 (budget 4,150 SAR; examples never tick targets): at least 270 SAR under budget with zero minutes: w_viol 1.2, H 5 (3,872 SAR, 278 under), w_viol 0.4, H 6 (3,874, 276 under), w_viol 1.5, H 5 (3,879, 271 under); the defaults give 245 under. At least 1,450 SAR left over 10 days: w_viol 0.5, H 6 (1,568), 0.6/6 (1,514); the defaults give 1,348 and w_viol 0.3 loses 39,939 SAR on one bad day. Zero minutes in a 5 °C heat wave: H 7 or H 8 with w_viol 1 (H 6 gives 10 minutes). The examples use w_viol 1, 2 and 3 (219 to 245 SAR under budget, 1,028 to 1,348 SAR left), H 3, w_viol 0 and an 8 °C heat wave at H 6, so none of them meets a target.</div>`,
+    mount: () => agentStep({
+      make: (p) => agents.utility({ wviol: p.wviol, horizon: p.horizon, wwear: p.wwear }),
+      params: [{ key: "wviol", label: "w_viol (risk aversion)", min: 0, max: 3, step: 0.1, default: 1.0, fmt: (v) => v.toFixed(1) }, { key: "horizon", label: "Horizon H (steps of 10 min)", min: 1, max: 12, step: 1, default: 6 }, { key: "wwear", label: "w_wear", min: 0, max: 3, step: 0.1, default: 0, fmt: (v) => v.toFixed(1) }],
+      heat: true,
+      help: "<b>w_viol</b>: how much the agent fears a violation (1 = exactly its expected cost in SAR). <b>Horizon H</b>: how many 10-minute steps ahead it simulates each cooling level. <b>w_wear</b>: a cost it adds for changing the level; it is not part of the bill. <b>Heat wave</b>: makes the outside air hotter all day. Every change is simulated at once on day 101.",
+      mission: {
+        goal: "Balance money against risk: finish day 101 at least <b>270 SAR under budget</b>, keep at least <b>1,450 SAR</b> of budget over 10 days, and keep zero minutes on day 101 in a <b>5 °C heat wave</b>.",
+        how: [
+          "The starting settings (w_viol 1, H 6) keep day 101 safe for 3,905 SAR. Read the bill and the peak temperature under the chart.",
+          "Drag <b>w_viol</b> down slowly: the agent fears violations less, runs closer to 27 °C and spends less. Watch <b>Under budget by</b> grow, and stop before red bands appear. Try <b>Horizon H</b> 5 as well.",
+          "For the 10 days, try <b>w_viol</b> between 0.5 and 0.8 with <b>Horizon H</b> 6 and watch <b>Money left over 10 days</b>. Too low a w_viol saves on most days but loses thousands on one bad day.",
+          "Drag <b>Heat wave</b> to 5: at H 6 the hall slips over the limit once. Then drag <b>Horizon H</b> up one step at a time until the red band disappears: a longer horizon plans the pre-cooling in time.",
+          "Keep <b>w_wear</b> at 0 unless you want to see what smoothing costs: wear is not part of the performance measure.",
+        ],
+        targets: [
+          { text: "At least 270 SAR under budget on day 101 (no heat wave)", test: (s) => s.heat === 0 && s.log.viol === 0 && s.left >= 270 },
+          { text: "At least 1,450 SAR of budget left over 10 days (no heat wave)", test: (s) => s.heat === 0 && s.ev.left >= 1450 },
+          { text: "Zero minutes on day 101 in a heat wave of 5 °C or more", test: (s) => s.heat >= 5 && s.log.viol === 0 },
+        ],
+      },
+      examples: (A) => [
+        { label: "Risk aversion: w_viol 1, 2, 3", note: "The slider stops at each value. Watch the peak temperature move away from the limit as w_viol grows, and what that costs.",
+          run: async () => { const r = [[1, (await A.reset({ wviol: 1 })).log]]; r.push([2, (await A.glide("wviol", 2, 1200)).log]); await sleep(600); r.push([3, (await A.glide("wviol", 3, 1200)).log]); A.say(r.map(([w, l]) => `w_viol ${w}: cost ${fmt(l.cost, 0)} SAR, peak ${fmt(l.peak, 1)} °C, ${l.viol * 10} minutes above 27 °C`).join("<br>")); } },
+        { label: "Shorten the horizon: H 6 to 3", note: "With H = 3 the agent looks only 30 minutes ahead, less than the cooling units need to respond. Watch it stop cooling and the red bands spread.",
+          run: async () => { const a = (await A.reset()).log; const b = (await A.glide("horizon", 3, 1500)).log; A.say(`H 6: ${res(a)}. H 3: ${res(b)}. Every level looks the same over 30 minutes, so the cheapest wins.`); } },
+        { label: "Play the day against the tariff", note: "Watch the cooling level against the colored tariff ribbon at the bottom, and the cost receipt under the chart. Every option is priced at each hour's tariff before the agent chooses.",
+          run: async () => { const r = await A.reset(); await A.view.play(9000, 0); A.say(`${res(r.log)}, ${vsBudget(r.left)} (budget ${fmt(r.budget, 0)} SAR).`); } },
+        { label: "w_viol = 0: no fear of violations", kind: "edge", note: "With w_viol = 0 the utility contains only the electricity bill. Watch what the cheapest action is.",
+          run: async () => { await A.reset(); const b = (await A.glide("wviol", 0, 1500)).log; A.say(`${res(b)}, energy ${fmt(b.energy / 1000, 2)} MWh. The agent is perfectly rational for its utility; the utility is wrong.`, "edge"); } },
+        { label: "A heat wave of 8 °C", kind: "edge", note: "The hottest day the slider allows, with the starting settings (H 6). Watch the afternoon: the agent sees the danger too late to pre-cool.",
+          run: async () => { const a = (await A.reset()).log; const b = (await A.glide("heat", 8, 1800)).log; A.say(`Normal day: ${res(a)}. Heat wave +8 °C at H 6: ${res(b)}. The horizon that was enough on a normal day is too short on an extreme one.`, "edge"); } },
+      ],
+    }),
+  });
+
+  steps.push({
+    id: "learning", title: "Agent 5: learning the model from data", time: 15,
+    mission: true,
+    theory: `<h3>When the designer's model is wrong</h3>
+      <p>So far the agents used the hall's true thermal constants: thermal mass, heat leak, cooling per level. In practice the designer <i>guesses</i> them from the building plans, and the guess is off (here: thermal mass 75% too high, heat leak too low, cooling gain 25% too high, so it believes the hall heats slowly and the cooling units are strong). A utility agent with the wrong model runs the cooling at the wrong level. A learning agent fixes the model from logged days. Its four components:</p>
+      <table><tr><th>Component</th><th>In our controller</th></tr>
+      <tr><td>Performance element</td><td>the utility-based agent that picks the cooling level</td></tr>
+      <tr><td>Critic</td><td>compares predicted and measured temperature changes (the performance standard is the physics)</td></tr>
+      <tr><td>Learning element</td><td>fits the three constants by least squares on the logged transitions: ΔT = (Δt / C) × (load + k (T_out − T) − gain × cooling level reached)</td></tr>
+      <tr><td>Problem generator</td><td>the logged days came from a deliberately crude thermostat that swings the cooling up and down: informative experiments, not optimal days</td></tr></table>
+      <p>Drag the training days from 0 to 10 and watch the estimated constants converge to the true ones, and the bill and violations drop. This is the autonomy the lecture talks about: the agent relies less on its designer's prior knowledge and more on its own experience.</p>`,
+    ask: `<div class='a'>Ask why the logged days used a crude controller (a good controller holds the temperature flat, which teaches nothing about the dynamics: no variation, no information). That is the exploration vs exploitation trade-off. Ask what else the agent could learn (the load pattern, the weather forecast, sensor bias).</div>
+      <div class='a'>Measured on day 101: with 0 days (the designer's guess) the agent spends 70 minutes above the limit, 50 with 1 day, 20 with 2 days, none from 3 days on; from 4 days on the learned constants equal the true ones. "Log more days" animates the bars converging; the edge case "Only one day of data" shows the estimate moving only part of the way.</div>
+      <div class='a'>Mission, measured on day 101 (examples never tick targets): the fewest logged days with the true constants is 4 (heat wave 0). Zero minutes with 3 days or fewer: exactly 3 days (3,874 SAR, 276 under budget). Money left over 10 days (w_viol 1): −8,699 SAR with 0 days, −3,866 with 1, −11 with 2, 1,680 with 3, 1,348 from 4 days on; at least 1,600 is reached with 3 days (1,680; with w_viol 0.5, 1,880). The 3-day model is slightly wrong but happens to be a little more cautious, which pays on these days: worth a question. The examples end at 10 days (1,348 SAR left), at 4 days in a 5 °C heat wave, at 0 days and at 1 day, so none of them meets a target.</div>`,
+    mount() {
+      const bars = canvas(760, 180); let shown = { ...GUESS }, btok = 0, shownDays = 0;
+      const drawBars = (m, days) => { const P = palette(), ctx = bars.getContext("2d"); ctx.clearRect(0, 0, 760, 180); ctx.font = "12px Public Sans, system-ui"; ctx.textBaseline = "alphabetic"; [["thermal mass C (MWh/°C)", TRUE.cth, m.cth, 1.6], ["heat leak k (MW/°C)", TRUE.kenv, m.kenv, 0.14], ["cooling gain (MW per level)", TRUE.gain, m.gain, 0.8]].forEach(([n, tv, ev, mx], i) => { const x = 20 + i * 250; ctx.strokeStyle = P.grid; ctx.beginPath(); ctx.moveTo(x - 4, 150.5); ctx.lineTo(x + 134, 150.5); ctx.stroke(); ctx.fillStyle = P.dark ? "#7d8aa3" : "#aab5c7"; ctx.fillRect(x, 150 - (tv / mx) * 120, 60, (tv / mx) * 120); ctx.fillStyle = P.cool; ctx.fillRect(x + 70, 150 - (ev / mx) * 120, 60, (ev / mx) * 120); ctx.fillStyle = P.ink; ctx.fillText(n, x, 170); ctx.fillStyle = P.label; ctx.fillText(`true ${tv}`, x, 145 - (tv / mx) * 120); ctx.fillText(`${days ? "learned" : "guess"} ${ev.toFixed(2)}`, x + 70, 145 - (ev / mx) * 120); }); };
+      const animateBars = (m, days) => { const my = ++btok, from = { ...shown }; shownDays = days; tween(450, (k) => { if (my !== btok) return; shown = { cth: from.cth + (m.cth - from.cth) * k, kenv: from.kenv + (m.kenv - from.kenv) * k, gain: from.gain + (m.gain - from.gain) * k }; drawBars(shown, days); }); };
+      drawBars(shown, 0); onTheme(() => drawBars(shown, shownDays));
+      return agentStep({
+        make: (p) => agents.utility({ wviol: p.wviol, horizon: 6, wwear: 0 }, learnModel(p.days)),
+        params: [{ key: "days", label: "Training days logged", min: 0, max: 10, step: 1, default: 0 }, { key: "wviol", label: "w_viol", min: 0, max: 3, step: 0.1, default: 1.0, fmt: (v) => v.toFixed(1) }],
+        heat: true,
+        help: "<b>Training days logged</b>: how many logged days the agent fits its model on (0 = the designer's guess). <b>w_viol</b>: its fear of violations, as in step 7. <b>Heat wave</b>: makes the outside air hotter all day. The bars under the chart compare the agent's model with the truth.",
+        after: (p) => animateBars(learnModel(p.days), p.days),
+        mission: {
+          goal: "Let the agent learn its model: find the <b>fewest logged days</b> that give the true constants, keep day 101 at <b>zero minutes</b> with even fewer, and keep at least <b>1,600 SAR</b> of budget over 10 days.",
+          how: [
+            "Start at 0 training days: the agent uses the designer's guess. Compare the blue bars (its model) with the gray bars (the truth) under the chart, and note the red bands.",
+            "Drag <b>Training days logged</b> up one day at a time and watch the blue bars move. Stop at the first value where all three match the gray bars (heat wave at 0).",
+            "Drag it back down one day at a time: find the fewest days that still give 0 minutes above 27 °C on day 101. The model does not have to be perfect to be good enough.",
+            "Then watch <b>Money left over 10 days</b>: try 3 days, and <b>w_viol</b> values below 1, until at least 1,600 SAR are left.",
+          ],
+          targets: [
+            { text: "The fewest logged days that give the true constants (no heat wave)", test: (s) => s.heat === 0 && s.p.days === 4 },
+            { text: "Zero minutes on day 101 with 3 logged days or fewer (no heat wave)", test: (s) => s.heat === 0 && s.log.viol === 0 && s.p.days <= 3 },
+            { text: "At least 1,600 SAR of budget left over 10 days (no heat wave)", test: (s) => s.heat === 0 && s.ev.left >= 1600 },
+          ],
+        },
+        below: h("div", {}, h("h3", {}, "Thermal constants: true vs the agent's model"), bars, themedLegend([[(P) => (P.dark ? "#7d8aa3" : "#aab5c7"), "true value"], [(P) => P.cool, "the agent's model"]])),
+        examples: (A) => [
+          { label: "Log more days: 0 to 10", note: "Watch the blue bars (the agent's model) slide to the gray bars (the truth), and the red bands on the chart disappear.",
+            run: async () => { const a = (await A.reset()).log; const b = (await A.glide("days", 10, 2600)).log; A.say(`0 days (the designer's guess): ${res(a)}. 10 days: ${res(b)}.`); } },
+          { label: "Guess against learned on a heat wave", note: "A 5 °C heat wave, first with the designer's guess, then with a model fitted on 4 logged days.",
+            run: async () => { const a = (await A.reset({ heat: 5 })).log; const b = (await A.glide("days", 4, 1500)).log; A.say(`Heat wave with the guess: ${res(a)}. With 4 days of data: ${res(b)}.`); } },
+          { label: "No data: 0 training days", kind: "edge", note: "With no logged days the learner has nothing to fit, so the agent falls back on the designer's guess. Play the day and watch where the wrong model lets the hall overheat.",
+            run: async () => { const r = await A.reset({ days: 0 }); await A.view.play(8000, 0); A.say(`With the guess only: ${res(r.log)}. The guess says the hall heats slowly and the cooling units are strong, so the agent cools too little.`, "edge"); } },
+          { label: "Only one day of data", kind: "edge", note: "One logged day is little evidence. The learner trusts the data fully only from 4 days, so after one day the estimate moves only part of the way from the guess.",
+            run: async () => { await A.reset({ days: 0 }); const b = (await A.glide("days", 1, 900)).log; const m = learnModel(1); A.say(`After 1 day: thermal mass ${m.cth} (true ${TRUE.cth}), heat leak ${m.kenv} (true ${TRUE.kenv}), cooling gain ${m.gain} (true ${TRUE.gain}). ${res(b)}.`, "edge"); } },
+        ],
+      });
+    },
+  });
+
+  steps.push({
+    id: "measure", title: "Rationality and the performance measure", time: 10,
+    mission: true,
+    theory: `<h3>All the agents, three measures</h3>
+      <p>Rationality is relative to the performance measure. Rank the agents under the real measure (bill plus penalties), then under "energy only" (a manager who looks at the PUE dashboard and nothing else) and under "never violate" (an operator afraid of the pager). Different winners.</p>
+      <ul><li>The lecture's warning: reward what you actually want. "Minimize energy" alone is maximized by switching the cooling off. "Never exceed 27 °C" alone is satisfied by running everything at full blast.</li>
+      <li><b>Omniscient</b> would mean knowing the exact load and weather every minute. The charts include such an agent: it is handed the true temperature and the exact future, and plans with them. Its cost is the best possible cost of a day, and the plant manager's budget is that cost plus 10%. No real agent can be expected to match it, only to come close with the knowledge it has.</li></ul>
+      <p>The rank chart has one column per measure and one line per agent. A line that stays level keeps its rank whatever we measure; a line that jumps is an agent that one measure loves and another hates.</p>`,
+    ask: `<div class='a'>Ask for predictions first. Then switch to energy-only: switching the cooling off "wins" while violating all day. Ask what this means for KPI design in a company. Switch to never-violate: several agents tie at zero minutes, full blast among them, so the measure cannot tell a careful agent from a wasteful one.</div>
+      <div class='a'>Show the rank chart: cooling off goes from last under the bill to first under energy only; full blast goes from the middle to a tie for first under never violate. The bars show the selected measure on a plain scale; bars longer than the axis are cut at its end with the full value printed.</div>
+      <div class='a'>Mission, measured on the 10 practice days (examples never tick targets; they all run with no heat wave except one that stays on energy only): under never violate the risk-neutral utility agent (w_viol 1) leaves the tie at rank 1 from a 5 °C heat wave (1 minute above the limit per day on average). Under the bill the cautious utility agent (w_viol 3) is cheaper from a 6 °C heat wave on: 5,250 against 5,609 SAR a day at +6, 5,927 against 9,760 at +8; at +5 the risk-neutral one is still cheaper (4,990 against 5,028). Without heat: energy only is won by cooling off (0.18 MWh and 1,326 minutes above the limit per day); never violate has 5 agents tied at 0 minutes.</div>`,
+    mount() {
+      let measure = "cost", heat = 0, focus = new Set();
+      const box = sayBox(), cache = {};
+      const list = [
+        ["Simple reflex (T_set 24)", "Reflex 24", () => agents.reflex(24, 8, 2)],
+        ["Simple reflex (T_set 26.5)", "Reflex 26.5", () => agents.reflex(26.5, 8, 2)],
+        ["Model-based (K 1.5, horizon 3)", "Model-based", () => agents.model(24, 1.5, 3)],
+        ["Goal-based (lookahead 40 min)", "Goal-based", () => agents.goal(25, 4, 1.5)],
+        ["Utility (w_viol 1)", "Utility w 1", () => agents.utility(UDEF)],
+        ["Utility, paranoid (w_viol 3)", "Utility w 3", () => agents.utility({ ...UDEF, wviol: 3 })],
+        ["Utility with the designer's wrong model", "Wrong model", () => agents.utility(UDEF, GUESS)],
+        ["Learning (10 days)", "Learning 10 d", () => agents.utility(UDEF, learnModel(10))],
+        ["Cooling off (level 0 all day)", "Cooling off", () => agents.constant(0)],
+        ["Full blast (level 10 all day)", "Full blast", () => agents.constant(10)],
+        ["Omniscient (perfect foresight, the reference)", "Omniscient", (d) => agents.replay(refLog(d).u)],
+      ];
+      const MEASURES = [["cost", "Bill + penalties"], ["energy", "Energy only"], ["viol", "Never violate"]];
+      const evalAt = (hh) => cache[hh] || (cache[hh] = list.map(([, , mk]) => scoreDays(mk, PRACTICE.map((s) => day(s, { heat: hh })))));
+      const R = list.map(([n, s], i) => { const cells = [h("td"), h("td", {}, n), h("td"), h("td"), h("td"), h("td")]; return { n, s, ref: i === list.length - 1, ev: null, cells, tr: h("tr", {}, ...cells) }; });
+      const tbody = h("tbody"), COL = { cost: 2, energy: 3, viol: 4 };
+      const val = (r, ms) => (ms === "cost" ? r.ev.cost : ms === "energy" ? r.ev.energy : r.ev.viol);
+      const key = (r) => val(r, measure);
+      const order = (ms) => R.slice().sort((a, b) => val(a, ms) - val(b, ms) || a.ev.cost - b.ev.cost);
+      const rankIn = (r, ms) => 1 + R.filter((o) => val(o, ms) < val(r, ms) - 1e-9).length;
+      const rankOf = (r) => rankIn(r, measure);
+      const tiedIn = (r, ms) => R.some((o) => o !== r && Math.abs(val(o, ms) - val(r, ms)) < 1e-9);
+      const winners = () => { const real = R.filter((r) => !r.ref), best = Math.min(...real.map(key)); return real.filter((r) => Math.abs(key(r) - best) < 1e-9); };
+      const UNIT = { cost: ["SAR/day", (v) => fmt(v, 0)], energy: ["MWh/day", (v) => fmt(v / 1000, 2)], viol: ["min/day", (v) => fmt(v * 10, 0)] };
+      let sorted = R;
+      function renderTable() {
+        sorted = order(measure);
+        sorted.forEach((r) => { r.cells[0].textContent = (tiedIn(r, measure) ? "=" : "") + rankOf(r); [fmt(r.ev.cost, 0), fmt(r.ev.energy / 1000, 2), fmt(r.ev.viol * 10, 0), signed(r.ev.left)].forEach((v, j) => (r.cells[j + 2].textContent = v)); r.cells.forEach((c, i) => (c.style.fontWeight = i === COL[measure] ? "700" : "")); tbody.append(r.tr); });
+      }
+
+      /* rank chart: one column per measure, one line per agent from its rank in one column to its rank in the next */
+      const RK = { W: 760, top: 60, row: 32, nameR: 220, xs: [270, 380, 490], nameL: 540 }, rk = canvas(RK.W, RK.top + RK.row * list.length + 10);
+      /* bar chart for the selected measure on a plain linear axis; bars longer than the axis are cut at its end */
+      const BR = { W: 760, l: 150, r: 170, top: 8, row: 30, axis: 30 }, bc = canvas(BR.W, BR.top + BR.row * list.length + BR.axis);
+      const nice = (v) => { const p = 10 ** Math.floor(Math.log10(v)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; };
+      function target() {
+        const pos = MEASURES.map(([ms]) => order(ms)), vals = R.map(key), cap = nice(Math.max(1e-9, vals.slice().sort((a, b) => a - b)[7] * 1.25));
+        return { band: MEASURES.findIndex(([ms]) => ms === measure), cap, rows: R.map((r, i) => ({ ys: pos.map((o) => o.indexOf(r)), y: order(measure).indexOf(r), len: vals[i] / cap })) };
+      }
+      let shown = null, ptok = 0, drawn = 0;
+      function animatePlots() {
+        const to = target(), from = shown || to, my = ++ptok, d0 = drawn;
+        tween(d0 < 1 ? 1400 : 750, (k) => {
+          if (my !== ptok) return;
+          const L = (a, b) => a + (b - a) * k;
+          shown = { band: L(from.band, to.band), cap: to.cap, rows: to.rows.map((p, i) => ({ ys: p.ys.map((y, j) => L(from.rows[i].ys[j], y)), y: L(from.rows[i].y, p.y), len: from.cap === to.cap ? L(from.rows[i].len, p.len) : p.len * k + from.rows[i].len * (1 - k) * (from.cap / to.cap) })) };
+          drawn = d0 + (1 - d0) * k;   // the lines draw in once; an interrupted draw-in continues from where it stopped
+          drawPlots();
+        });
+      }
+      function drawPlots() {
+        if (!shown) return;
+        const P = palette(), ink = P.ink, muted = P.dark ? "#9aa7bd" : "#8794a8", line = P.grid, lag = P.cool, coral = P.cursor, onNode = P.dark ? "#141922" : "#fff", win = new Set(winners());
+        const hot = (r) => win.has(r) || focus.has(r), color = (r) => (hot(r) ? coral : r.ref ? muted : lag);
+        // rank chart
+        let ctx = rk.getContext("2d"); ctx.clearRect(0, 0, rk.width, rk.height); ctx.textBaseline = "middle";
+        const Y = (i) => RK.top + RK.row * (i + 0.5), bx = RK.xs[0] + (RK.xs[1] - RK.xs[0]) * shown.band;
+        ctx.fillStyle = lag; ctx.globalAlpha = 0.12; ctx.beginPath(); ctx.roundRect(bx - 50, 8, 100, rk.height - 12, 10); ctx.fill(); ctx.globalAlpha = 1;
+        MEASURES.forEach(([ms, label], j) => { ctx.font = (ms === measure ? "bold " : "") + "13px Public Sans, system-ui"; ctx.fillStyle = ms === measure ? ink : muted; ctx.textAlign = "center"; ctx.fillText(label, RK.xs[j], 26); ctx.font = "11px Public Sans, system-ui"; ctx.fillText("rank", RK.xs[j], 44); });
+        const layers = R.slice().sort((a, b) => (hot(a) ? 1 : 0) - (hot(b) ? 1 : 0));   // highlighted lines on top
+        layers.forEach((r) => {
+          const p = shown.rows[R.indexOf(r)], c = color(r);
+          ctx.strokeStyle = c; ctx.lineWidth = hot(r) ? 3.5 : 2; ctx.globalAlpha = hot(r) ? 1 : 0.55; ctx.setLineDash(r.ref ? [6, 4] : []);
+          ctx.beginPath(); ctx.moveTo(RK.xs[0], Y(p.ys[0]));
+          for (let j = 1; j < 3; j++) { const f = clamp(drawn * 2 - (j - 1), 0, 1); if (f <= 0) break; const x0 = RK.xs[j - 1], x1 = RK.xs[j], y0 = Y(p.ys[j - 1]), y1 = Y(p.ys[j]), xm = x0 + (x1 - x0) * f; const yy = (x) => { const u = (x - x0) / (x1 - x0), e = u * u * (3 - 2 * u); return y0 + (y1 - y0) * e; }; for (let x = x0; x <= xm; x += 4) ctx.lineTo(x, yy(x)); ctx.lineTo(xm, yy(xm)); }
+          ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+        });
+        R.forEach((r) => {
+          const p = shown.rows[R.indexOf(r)], c = color(r);
+          MEASURES.forEach(([ms], j) => { if (j > 0 && drawn * 2 < j) return; const x = RK.xs[j], y = Y(p.ys[j]); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 11, 0, 7); ctx.fill(); ctx.fillStyle = onNode; ctx.font = "bold 11px Public Sans, system-ui"; ctx.textAlign = "center"; ctx.fillText((tiedIn(r, ms) ? "=" : "") + rankIn(r, ms), x, y + 0.5); });
+          ctx.font = (hot(r) ? "bold " : "") + "13px Public Sans, system-ui"; ctx.fillStyle = hot(r) ? coral : ink;
+          ctx.textAlign = "right"; ctx.fillText(r.s, RK.nameR, Y(p.ys[0]));
+          if (drawn >= 1) { ctx.textAlign = "left"; ctx.fillText(r.s, RK.nameL, Y(p.ys[2])); }
+        });
+        // bars
+        ctx = bc.getContext("2d"); ctx.clearRect(0, 0, bc.width, bc.height); ctx.textBaseline = "middle";
+        const bw = BR.W - BR.l - BR.r, [unit, show] = UNIT[measure], axisY = BR.top + BR.row * list.length + 4;
+        ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.fillStyle = muted; ctx.font = "12px Public Sans, system-ui"; ctx.textAlign = "center";
+        [0, 0.5, 1].forEach((f) => { const x = BR.l + f * bw; ctx.beginPath(); ctx.moveTo(x, BR.top); ctx.lineTo(x, axisY + 4); ctx.stroke(); ctx.textAlign = f === 1 ? "right" : "center"; ctx.fillText(show(shown.cap * f) + (f === 1 ? " " + unit : ""), f === 1 ? x + 6 : x, axisY + 16); });
+        R.forEach((r, i) => {
+          const p = shown.rows[i], y = BR.top + p.y * BR.row, len = clamp(p.len, 0, 1) * bw, cut = p.len > 1.0001;
+          ctx.font = (hot(r) ? "bold " : "") + "13px Public Sans, system-ui"; ctx.fillStyle = hot(r) ? coral : ink; ctx.textAlign = "right"; ctx.fillText(r.s, BR.l - 10, y + BR.row / 2);
+          ctx.fillStyle = color(r); ctx.globalAlpha = r.ref && !hot(r) ? 0.6 : 1; ctx.fillRect(BR.l, y + 6, Math.max(2, len), BR.row - 12); ctx.globalAlpha = 1;
+          ctx.font = "12px Public Sans, system-ui"; ctx.fillStyle = ink; ctx.textAlign = "left"; ctx.fillText(`${show(key(r))} ${unit}${cut ? " (cut)" : ""}`, BR.l + len + 8, y + BR.row / 2);
+        });
+      }
+      onTheme(drawPlots);
+
+      const m = mission({
+        goal: "Find out how the choice of performance measure, and the weather, change which agent looks best.",
+        how: [
+          "Read the rank chart: one column per measure, one line per agent. Rank 1 is at the top. The colored band marks the measure selected under <b>Your controls</b>, and the bars under it show its values.",
+          "Use the <b>Performance measure</b> menu to switch between the three measures and watch the highlighted winner change.",
+          "Choose <b>Never violate</b>, then drag <b>Heat wave on all 10 days</b> up one degree at a time. Watch the lines that share rank 1: find the heat at which the utility agent with w 1 drops out of the tie.",
+          "Choose <b>Bill + penalties</b> and drag the heat wave up again. Watch the two utility lines (w 1 and w 3) in the first column: find the heat at which the cautious one becomes cheaper.",
+        ],
+        targets: [
+          { text: "Never violate: find a heat wave that pushes the risk-neutral utility agent (w_viol 1) out of the tie at rank 1", test: (st) => st.measure === "viol" && st.u1rank > 1 },
+          { text: "Bill + penalties: find a heat wave at which the cautious utility agent (w_viol 3) is cheaper than the risk-neutral one", test: (st) => st.measure === "cost" && st.cautiousWins },
+        ],
+      });
+      const uw1 = R.find((r) => r.s === "Utility w 1"), uw3 = R.find((r) => r.s === "Utility w 3");
+      function refresh() {
+        const evs = evalAt(heat); R.forEach((r, i) => (r.ev = evs[i]));
+        renderTable(); animatePlots();
+        if (!demo) m.update({ measure, heat, u1rank: rankOf(uw1), cautiousWins: uw3.ev.cost < uw1.ev.cost });
+      }
+      const sel = select({ label: "Performance measure", options: [{ value: "cost", label: "Bill + penalties (the real one)" }, { value: "energy", label: "Energy only (PUE dashboard)" }, { value: "viol", label: "Never violate (minutes above 27 °C)" }], value: measure, onchange: (v) => { measure = v; refresh(); } });
+      const heatCtl = range({ label: "Heat wave on all 10 days (°C)", min: 0, max: 8, step: 1, value: 0, onchange: (v) => { heat = v; refresh(); } });
+      refresh();
+      const switchTo = async (v) => { if (heat !== 0) await heatCtl.animateTo(0, 700); if (sel.get() !== v) sel.apply(v); await sleep(1000); };
+      const flash = async (rows) => { focus = new Set(rows); drawPlots(); for (const r of rows) { pulse(r.tr); await sleep(260); } await sleep(1600); focus = new Set(); drawPlots(); };
+      const ex = exampleBox([
+        { label: "Switch to energy only", note: "Watch the band move to the middle column and the bars re-sort. With energy as the only measure, the agent that never cools wins.",
+          run: async () => { await switchTo("energy"); const top = sorted[0]; await flash([top]); box.say(`Winner under energy only: ${top.n}, ${fmt(top.ev.energy / 1000, 2)} MWh per day and ${fmt(top.ev.viol * 10, 0)} minutes above 27 °C per day.`); } },
+        { label: "Switch to never violate", note: "Watch the band move to the right column. Now only the minutes above 27 °C count, whatever the bill.",
+          run: async () => { await switchTo("viol"); const top = sorted.filter((r) => rankOf(r) === 1); await flash(top); box.say(`Rank 1 under never violate: ${top.map((r) => r.n).join("; ")}.`); } },
+        { label: "Back to bill plus penalties", note: "The real measure. Follow the lines from the left column: the cheap but reckless agents fall to the bottom.",
+          run: async () => { await switchTo("cost"); const real = sorted.find((r) => !r.ref); await flash([real]); box.say(`Best real agent: ${real.n}, ${fmt(real.ev.cost, 0)} SAR a day, ${signed(real.ev.left)} SAR left in the budget over 10 days (${real.ev.within} of 10 days within budget).`); } },
+        { label: "Heat wave: watch the ranks shift", note: "Energy only stays selected while the heat wave on all 10 days grows from 0 to 8 °C. Watch the lines move in all three columns: every agent needs more energy, and some start to violate.",
+          run: async () => { await switchTo("energy"); await heatCtl.animateTo(8, 3200); await sleep(900); await flash([uw1, uw3]); box.say(`At +8 °C the utility agent with w_viol 1 spends ${fmt(uw1.ev.viol * 10, 0)} minutes a day above the limit, the cautious one with w_viol 3 only ${fmt(uw3.ev.viol * 10, 0)}. Compare their places in the first two columns.`); } },
+        { label: "Ties under never violate", kind: "edge", note: "Several agents never cross the limit on the practice days, so this measure cannot separate them. Watch the lines that share rank 1 (marked =1).",
+          run: async () => { await switchTo("viol"); const top = sorted.filter((r) => rankOf(r) === 1); await flash(top); const fb = R.find((r) => r.s === "Full blast"), cheap = top.find((r) => !r.ref) || top[0]; box.say(top.length > 1 ? `${top.length} agents tie at ${fmt(key(top[0]) * 10, 0)} minutes, marked =1. The chart lists them by cost inside the tie, but the measure itself prefers none of them: the cheapest real agent in the tie costs ${fmt(cheap.ev.cost, 0)} SAR a day, full blast ${fmt(fb.ev.cost, 0)} SAR.` : `No tie: ${top[0].n} is alone at rank 1.`, "edge"); } },
+        { label: "The omniscient reference", kind: "edge", note: "An agent that cannot exist: it is handed the true temperature and the exact future load and weather. Watch its dashed line.",
+          run: async () => { await switchTo("cost"); const om = R.find((r) => r.ref), real = sorted.find((r) => r !== om); await flash([om]); box.say(`The omniscient agent costs ${fmt(om.ev.cost, 0)} SAR a day: that is the best possible cost, and each day's budget is it plus 10%, so it always ends under budget (${signed(om.ev.left)} SAR left over 10 days). The best real agent costs ${fmt(real.ev.cost, 0)} SAR a day and keeps ${signed(real.ev.left)} SAR. The gap is the price of not knowing the future.`, "edge"); } },
+      ], box);
+      return h("div", {}, m, h("div", { class: "lab" },
+        h("div", { class: "controls" }, h("h3", { style: "margin:0" }, "Your controls"), sel, heatCtl, h("p", { class: "note" }, "All agents run on the same 10 practice days; the heat wave raises the outside temperature on all of them. Every change is recomputed at once."), ex, box),
+        h("div", { class: "stage" },
+          h("h3", { style: "margin-top:0" }, "Rank of every agent under each measure"), rk,
+          themedLegend([[(P) => P.cursor, "winner under the selected measure"], [(P) => P.cool, "other agents"], [(P) => (P.dark ? "#9aa7bd" : "#8794a8"), "omniscient reference (dashed); = marks a tied rank"]]),
+          h("h3", {}, "Values under the selected measure (best on top)"), bc, h("p", { class: "note", style: "margin:.2rem 0" }, "Units: SAR per day for the bill, MWh per day for energy, minutes above 27 °C per day for never violate; averages over the 10 practice days."),
+          h("p", { class: "note" }, "Bars longer than the axis are cut at its end; the number after them is the full value. " + BUDGET_NOTE),
+          h("details", { class: "deeper" }, h("summary", {}, "All numbers"), h("div", { class: "wide" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Rank"), h("th", {}, "Agent"), h("th", {}, "Avg cost (SAR)"), h("th", {}, "Energy (MWh)"), h("th", {}, "Minutes above 27 °C"), h("th", {}, "Money left over 10 days (SAR)"))), tbody))))));
+    },
+  });
+
+  steps.push({
+    id: "tournament", title: "Tournament: the cooling league", tour: true, time: 20,
+    mission: true,   // the tournament's "How to play" box replaces the task box
+    mount: () => h("div", {}, tournament(TOUR)),
+  });
+
+  /* welcome scene: the data hall in 3D under a slowly orbiting camera. Cold air (blue) rises from the perforated tiles of the cold aisle,
+     is drawn through the rack fronts, leaves the backs hot (orange to red) into the hot aisles, rises to the ceiling and returns to the
+     cooling units at both ends, which send it back cold under the raised floor. A thin warm stream leaks in through the sunlit wall.
+     Pure canvas 2D: perspective projection, painter's order for the boxes, additive sprites for air and glow. Returns stop(). */
+  function hallScene(cv) {
+    const ctx = cv.getContext("2d"), still = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const MAXN = 3600, LEAKN = 140, NB = 32, NR = 8;
+    const RX = 4.2, AISLE = 0.7, RD = 1.0, RH = 2.0, CEIL = 3.1, UX = 5.35, UD = 0.85, UH = 2.5, UZ = 1.7, FX = 6.3, FZ = 4.2, SUB = -0.32;
+    const rnd = Math.random, TAU = Math.PI * 2;
+    // color ramp of the air: deep blue, cyan, amber, orange, red
+    const RAMP = [[0, 45, 135, 255], [0.2, 90, 215, 255], [0.45, 255, 205, 120], [0.7, 255, 135, 45], [1, 255, 55, 35]];
+    const rampAt = (T) => { let i = 0; while (i < RAMP.length - 2 && T > RAMP[i + 1][0]) i++; const a = RAMP[i], b = RAMP[i + 1], k = Math.min(1, Math.max(0, (T - a[0]) / (b[0] - a[0]))); return [0, 1, 2].map((j) => Math.round(a[j + 1] + (b[j + 1] - a[j + 1]) * k)); };
+    const sprite = (rgb, core, size) => {
+      const c = document.createElement("canvas"); c.width = c.height = size; const g = c.getContext("2d"), r = size / 2, gr = g.createRadialGradient(r, r, 0, r, r, r);
+      const mix = (w) => rgb.map((v) => Math.round(v + (255 - v) * w)).join(",");
+      if (core) { gr.addColorStop(0, `rgba(${mix(0.65)},1)`); gr.addColorStop(0.18, `rgba(${mix(0.15)},.9)`); gr.addColorStop(0.45, `rgba(${rgb.join(",")},.28)`); }
+      else { gr.addColorStop(0, `rgba(${rgb.join(",")},.55)`); gr.addColorStop(0.5, `rgba(${rgb.join(",")},.18)`); }
+      gr.addColorStop(1, `rgba(${rgb.join(",")},0)`); g.fillStyle = gr; g.fillRect(0, 0, size, size); return c;
+    };
+    const SPR = []; for (let i = 0; i < NB; i++) SPR.push(sprite(rampAt(i / (NB - 1)), true, 32));
+    const HOTG = NB, COLDG = NB + 1, SUNG = NB + 2, LEDG = NB + 3;
+    SPR.push(sprite([255, 110, 40], false, 64), sprite([60, 170, 255], false, 64), sprite([255, 170, 80], false, 128), sprite([120, 255, 170], true, 16));
+    // racks: two rows facing the cold aisle (z = 0); row +1 spans z AISLE..AISLE+RD, row -1 the mirror image
+    const boxes = [], RW = (2 * RX) / NR;
+    for (const sg of [-1, 1]) for (let k = 0; k < NR; k++) {
+      const x0 = -RX + k * RW + 0.03, x1 = x0 + RW - 0.06, z0 = sg > 0 ? AISLE : -AISLE - RD, z1 = z0 + RD;
+      boxes.push({ kind: 0, sg, k, x0, x1, y0: 0, y1: RH, z0, z1, heat: 0.7 + 0.3 * rnd(), led: Array.from({ length: 9 }, () => ({ r: 1 + 5 * rnd(), p: rnd() * TAU, amber: rnd() < 0.08 })) });
+    }
+    for (const d of [-1, 1]) boxes.push({ kind: 1, sg: d, x0: d > 0 ? UX : -UX - UD, x1: d > 0 ? UX + UD : -UX, y0: 0, y1: UH, z0: -UZ, z1: UZ });
+    const NBOX = boxes.length, bp = boxes.map(() => new Float32Array(16)), bd = new Float32Array(NBOX), border = Array.from(boxes.keys());
+    const rackHeat = (sg, x) => boxes[(sg > 0 ? NR : 0) + Math.min(NR - 1, Math.max(0, Math.floor((x + RX) / RW)))].heat;
+    // air particles: phase 0 under the floor, 1 rising from the tiles, 2 to the rack fronts, 3 inside a rack, 4 out of the back,
+    // 5 up to the ceiling, 6 back along the ceiling to a cooling unit, 7 down through the unit, turning cold
+    const px = new Float32Array(MAXN), py = new Float32Array(MAXN), pz = new Float32Array(MAXN), pT = new Float32Array(MAXN), ph = new Uint8Array(MAXN);
+    const psg = new Int8Array(MAXN), pdir = new Int8Array(MAXN), ptx = new Float32Array(MAXN), ptz = new Float32Array(MAXN), phh = new Float32Array(MAXN), phz = new Float32Array(MAXN), pseed = new Float32Array(MAXN);
+    const spawn = (i, dir) => { pdir[i] = dir; px[i] = dir * (UX + 0.2); py[i] = SUB + 0.1; pz[i] = (rnd() - 0.5) * 2.4; ptx[i] = (rnd() * 2 - 1) * (RX - 0.25); ptz[i] = (rnd() - 0.5) * 1.1; phh[i] = 0.12 + rnd() * 1.8; psg[i] = rnd() < 0.5 ? -1 : 1; phz[i] = AISLE + RD + 0.4 + rnd() * 1.6; pT[i] = 0; ph[i] = 0; };
+    for (let i = 0; i < MAXN; i++) { pseed[i] = rnd() * TAU; spawn(i, rnd() < 0.5 ? -1 : 1); px[i] = pdir[i] * (UX + 0.2) * rnd(); ptx[i] = px[i] * 0.8; }
+    const lx = new Float32Array(LEAKN), ly = new Float32Array(LEAKN), lz = new Float32Array(LEAKN), ll = new Float32Array(LEAKN);
+    const leakSpawn = (i) => { lx[i] = (rnd() * 2 - 1) * (FX - 0.6); ly[i] = 0.3 + rnd() * 2.6; lz[i] = -FZ; ll[i] = 0; };
+    for (let i = 0; i < LEAKN; i++) { leakSpawn(i); ll[i] = rnd(); lz[i] = -FZ + ll[i] * 1.8; }
+    function step(dt, t, n) {
+      for (let i = 0; i < n; i++) {
+        const s = pseed[i], w = Math.sin(t * 1.7 + s), sg = psg[i];
+        switch (ph[i]) {
+          case 0: { const dx = ptx[i] - px[i], m = 2.6 * dt; px[i] += Math.abs(dx) < m ? dx : Math.sign(dx) * m; pz[i] += (ptz[i] - pz[i]) * Math.min(1, 2.5 * dt); if (Math.abs(dx) < 0.03) ph[i] = 1; break; }
+          case 1: py[i] += (0.8 + 0.25 * Math.sin(s * 3)) * dt; px[i] += 0.12 * w * dt; if (py[i] > phh[i]) ph[i] = 2; break;
+          case 2: pz[i] += sg * (0.75 + 0.2 * Math.cos(s)) * dt; py[i] += 0.08 * w * dt; if (sg * pz[i] > AISLE) ph[i] = 3; break;
+          case 3: pz[i] += sg * 1.5 * dt; pT[i] = rackHeat(sg, px[i]) * Math.min(1, (sg * pz[i] - AISLE) / RD); if (sg * pz[i] > AISLE + RD) ph[i] = 4; break;
+          case 4: pz[i] += sg * 1.0 * dt; py[i] += 0.14 * dt; px[i] += 0.1 * w * dt; if (sg * pz[i] > phz[i]) ph[i] = 5; break;
+          case 5: py[i] += (0.75 + 0.2 * Math.cos(s * 2)) * dt; pz[i] += sg * 0.12 * dt; px[i] += 0.15 * w * dt; if (py[i] > CEIL - 0.25 + 0.2 * Math.sin(s * 5)) { ph[i] = 6; pdir[i] = px[i] + 1.2 * Math.sin(s * 7) > 0 ? 1 : -1; } break;
+          case 6: px[i] += pdir[i] * (1.5 + 0.3 * Math.cos(s)) * dt; pz[i] -= pz[i] * 0.35 * dt; py[i] += (CEIL - 0.15 + 0.12 * w - py[i]) * Math.min(1, 2 * dt); pT[i] = Math.max(0.5, pT[i] - 0.02 * dt); if (pdir[i] * px[i] > UX - 0.12) ph[i] = 7; break;
+          case 7: py[i] -= 1.35 * dt; px[i] += (pdir[i] * (UX - 0.1) - px[i]) * Math.min(1, 4 * dt); pT[i] = Math.max(0, pT[i] - 0.55 * dt); if (py[i] < SUB + 0.1) spawn(i, pdir[i]); break;
+        }
+      }
+      for (let i = 0; i < LEAKN; i++) { ll[i] += dt / 3.4; lz[i] += 0.55 * dt; ly[i] += 0.1 * dt; lx[i] += 0.08 * Math.sin(t + i) * dt; if (ll[i] >= 1) leakSpawn(i); }
+    }
+    // additive items (particles, glows) in projected form; bucketed between the depth-sorted boxes
+    const NI = MAXN + LEAKN + 2 * NR + 2 * NR + 2;
+    const ix = new Float32Array(NI), iy = new Float32Array(NI), ir = new Float32Array(NI), ia = new Float32Array(NI), iz = new Float32Array(NI), is = new Uint8Array(NI), ib = new Uint8Array(NI), ord = new Int32Array(NI), cnt = new Int32Array(NBOX + 2);
+    const LABELS = [
+      { t: "cold aisle · 18 °C", p: [0.6, 2.25, 0], c: "160,220,255" },
+      { t: "servers · 2 MW of heat", p: [-1.6, RH + 0.3, AISLE + RD / 2], c: "220,228,245" },
+      { t: "hot aisle · 35 °C", p: [1.4, 2.55, AISLE + RD + 1.2], c: "255,180,120" },
+      { t: "cooling unit", p: [UX + UD / 2, UH + 0.35, 0], c: "160,220,255" },
+      { t: "heat leaking in from a hot sun", p: [-1.5, 2.3, -FZ], c: "255,190,120" },
+      { t: "cooling unit", p: [-UX - UD / 2, UH + 0.35, 0], c: "160,220,255" },
+    ];
+    let raf = 0, last = 0, t0 = 0, alive = true, bgKey = "", bgGrad = null, vgGrad = null;
+    let cx = 0, cy = 0, cz = 0, fx = 0, fy = 0, fz = 0, rx = 0, rz = 0, ux = 0, uy = 0, uz = 0, F = 1, OX = 0, OY = 0;
+    let qx = 0, qy = 0, qz = 0;   // last projection: screen x, y, camera depth
+    const proj = (x, y, z) => { const dx = x - cx, dy = y - cy, dz = z - cz; qz = dx * fx + dy * fy + dz * fz; const s = F / Math.max(0.1, qz); qx = OX + (dx * rx + dz * rz) * s; qy = OY - (dx * ux + dy * uy + dz * uz) * s; };
+    function camera(t, W, H) {
+      const th = 0.75 + t * 0.05, el = 0.42 + 0.07 * Math.sin(t * 0.11), R = 19, tx = 0, ty = 0.8, tz = 0;
+      cx = tx + R * Math.cos(el) * Math.sin(th); cy = ty + R * Math.sin(el); cz = tz + R * Math.cos(el) * Math.cos(th);
+      let l = Math.hypot(tx - cx, ty - cy, tz - cz); fx = (tx - cx) / l; fy = (ty - cy) / l; fz = (tz - cz) / l;
+      l = Math.hypot(fz, fx); rx = -fz / l; rz = fx / l;
+      ux = -rz * fy; uy = rz * fx - rx * fz; uz = rx * fy;   // up = right × forward (right.y = 0)
+      F = Math.min(W * 0.78, H * 1.65); OX = W * 0.68; OY = H * 0.6;
+    }
+    const lineW = (a, b, c, d, e, f) => { proj(a, b, c); ctx.moveTo(qx, qy); proj(d, e, f); ctx.lineTo(qx, qy); };
+    const quad = (P, a, b, c, d) => { ctx.beginPath(); ctx.moveTo(P[2 * a], P[2 * a + 1]); ctx.lineTo(P[2 * b], P[2 * b + 1]); ctx.lineTo(P[2 * c], P[2 * c + 1]); ctx.lineTo(P[2 * d], P[2 * d + 1]); ctx.closePath(); };
+    function drawBox(bi, t, dpr) {
+      const B = boxes[bi], P = bp[bi], rack = B.kind === 0;
+      ctx.globalCompositeOperation = "source-over"; ctx.lineWidth = dpr; ctx.strokeStyle = rack ? "rgba(140,170,225,.28)" : "rgba(110,200,255,.5)";
+      const face = (a, b, c, d, fill) => { quad(P, a, b, c, d); ctx.fillStyle = fill; ctx.fill(); ctx.stroke(); };
+      const front = rack ? (B.sg > 0 ? -1 : 1) : 0;   // which z side faces the cold aisle
+      if (cy > B.y1) face(2, 3, 7, 6, rack ? "#33425f" : "#2f4466");
+      if (cx > B.x1) face(1, 3, 7, 5, rack ? "#222d44" : "#1f3150");
+      if (cx < B.x0) face(0, 2, 6, 4, rack ? "#1d273b" : "#1f3150");
+      if (cz > B.z1) face(4, 5, 7, 6, rack ? (front > 0 ? "#161e30" : "#2a2230") : "#24365a");
+      if (cz < B.z0) face(0, 1, 3, 2, rack ? (front < 0 ? "#161e30" : "#2a2230") : "#24365a");
+      if (rack) {
+        const zf = front > 0 ? B.z1 : B.z0, zb = front > 0 ? B.z0 : B.z1, seeFront = front > 0 ? cz > zf : cz < zf, seeBack = front > 0 ? cz < zb : cz > zb;
+        if (seeFront) {
+          ctx.strokeStyle = "rgba(120,150,200,.22)"; ctx.beginPath(); for (let j = 1; j < 10; j++) lineW(B.x0 + 0.05, (RH * j) / 10, zf, B.x1 - 0.05, (RH * j) / 10, zf); ctx.stroke();
+          ctx.globalCompositeOperation = "lighter";
+          for (let j = 0; j < 9; j++) {
+            const L = B.led[j], on = Math.sin(t * L.r + L.p); if (on < -0.2) continue;
+            proj(B.x0 + 0.12, (RH * (j + 0.5)) / 10, zf); const r = Math.max(1.2 * dpr, (F * 0.05) / qz);
+            ctx.globalAlpha = 0.5 + 0.5 * Math.max(0, on); ctx.fillStyle = L.amber ? "#ffb347" : j % 3 === 1 ? "#7ab8ff" : "#6dffa6"; ctx.fillRect(qx - r / 2, qy - r / 2, r, r);
+            proj(B.x0 + 0.2, (RH * (j + 0.5)) / 10, zf); ctx.fillRect(qx - r / 2, qy - r / 2, r * 0.8, r * 0.8);
+          }
+          ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+        } else if (seeBack) {
+          ctx.strokeStyle = "rgba(255,140,80,.16)"; ctx.beginPath(); for (let j = 1; j < 6; j++) { const x = B.x0 + ((B.x1 - B.x0) * j) / 6; lineW(x, 0.08, zb, x, RH - 0.08, zb); } ctx.stroke();
+        }
+      } else {
+        const xf = B.sg > 0 ? B.x0 : B.x1;   // hall-facing side of the cooling unit
+        if (B.sg > 0 ? cx < xf : cx > xf) {
+          ctx.strokeStyle = "rgba(140,210,255,.25)"; ctx.beginPath(); for (let j = 1; j < 12; j++) { const y = 0.9 + (j * (UH - 1.0)) / 12; lineW(xf, y, -UZ + 0.12, xf, y, UZ - 0.12); } ctx.stroke();
+          ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = `rgba(80,190,255,${0.35 + 0.15 * Math.sin(t * 2)})`;
+          ctx.beginPath(); proj(xf, 0.12, -UZ + 0.1); ctx.moveTo(qx, qy); proj(xf, 0.12, UZ - 0.1); ctx.lineTo(qx, qy); proj(xf, 0.5, UZ - 0.1); ctx.lineTo(qx, qy); proj(xf, 0.5, -UZ + 0.1); ctx.lineTo(qx, qy); ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+        }
+      }
+    }
+    function frame(t, dt) {
+      const W = cv.width, H = cv.height, dpr = Math.max(1, W / Math.max(1, cv.clientWidth || W));
+      const n = Math.min(MAXN, Math.max(500, Math.round((W * H) / 380)));
+      if (dt > 0) step(dt, t, n);
+      camera(t, W, H);
+      const key = W + "x" + H;
+      if (key !== bgKey) {
+        bgKey = key; bgGrad = ctx.createRadialGradient(W * 0.68, H * 0.5, 0, W * 0.68, H * 0.5, Math.max(W, H) * 0.7); bgGrad.addColorStop(0, "#14213a"); bgGrad.addColorStop(1, "#0b1220");
+        vgGrad = ctx.createLinearGradient(0, 0, W, 0); vgGrad.addColorStop(0, "rgba(11,18,32,.94)"); vgGrad.addColorStop(0.3, "rgba(11,18,32,.78)"); vgGrad.addColorStop(0.5, "rgba(11,18,32,.3)"); vgGrad.addColorStop(0.66, "rgba(11,18,32,0)");
+      }
+      ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+      // the sun beyond the leaking wall
+      ctx.globalCompositeOperation = "lighter"; proj(-2, 13, -38);
+      if (qz > 4) { const r = Math.min(W * 0.5, (F * 14) / qz); ctx.globalAlpha = 0.55 * Math.min(1, (qz - 4) / 10); ctx.drawImage(SPR[SUNG], qx - r, qy - r, 2 * r, 2 * r); ctx.globalAlpha = 1; }
+      // the leaking wall, a faint warm pane
+      ctx.beginPath(); proj(-FX, 0, -FZ); ctx.moveTo(qx, qy); proj(FX, 0, -FZ); ctx.lineTo(qx, qy); proj(FX, CEIL, -FZ); ctx.lineTo(qx, qy); proj(-FX, CEIL, -FZ); ctx.lineTo(qx, qy); ctx.closePath();
+      ctx.fillStyle = `rgba(255,120,50,${0.05 + 0.02 * Math.sin(t * 0.8)})`; ctx.fill();
+      ctx.globalCompositeOperation = "source-over"; ctx.lineWidth = dpr; ctx.strokeStyle = "rgba(255,150,90,.22)"; ctx.stroke();
+      // the raised floor: slab edges, plate, grid, perforated cold-aisle tiles
+      ctx.strokeStyle = "rgba(130,160,215,.12)"; ctx.beginPath();
+      for (const [a, b] of [[-FX, -FZ], [FX, -FZ], [FX, FZ], [-FX, FZ]]) { lineW(a, SUB, b, a, 0, b); lineW(a, 0, b, a, CEIL, b); }
+      lineW(-FX, SUB, -FZ, FX, SUB, -FZ); lineW(FX, SUB, -FZ, FX, SUB, FZ); lineW(FX, SUB, FZ, -FX, SUB, FZ); lineW(-FX, SUB, FZ, -FX, SUB, -FZ);
+      lineW(-FX, CEIL, -FZ, FX, CEIL, -FZ); lineW(FX, CEIL, -FZ, FX, CEIL, FZ); lineW(FX, CEIL, FZ, -FX, CEIL, FZ); lineW(-FX, CEIL, FZ, -FX, CEIL, -FZ);
+      ctx.stroke();
+      ctx.beginPath(); proj(-FX, 0, -FZ); ctx.moveTo(qx, qy); proj(FX, 0, -FZ); ctx.lineTo(qx, qy); proj(FX, 0, FZ); ctx.lineTo(qx, qy); proj(-FX, 0, FZ); ctx.lineTo(qx, qy); ctx.closePath();
+      ctx.fillStyle = "rgba(20,30,50,.82)"; ctx.fill();
+      ctx.strokeStyle = "rgba(130,160,215,.13)"; ctx.beginPath();
+      for (let x = -FX; x <= FX + 1e-6; x += 0.7) lineW(x, 0, -FZ, x, 0, FZ);
+      for (let z = -FZ; z <= FZ + 1e-6; z += 0.7) lineW(-FX, 0, z, FX, 0, z);
+      ctx.stroke();
+      ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = `rgba(60,160,255,${0.13 + 0.04 * Math.sin(t * 1.3)})`;
+      ctx.beginPath(); proj(-RX, 0, -AISLE); ctx.moveTo(qx, qy); proj(RX, 0, -AISLE); ctx.lineTo(qx, qy); proj(RX, 0, AISLE); ctx.lineTo(qx, qy); proj(-RX, 0, AISLE); ctx.lineTo(qx, qy); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(110,200,255,.16)"; ctx.beginPath(); for (let x = -RX + 0.175; x < RX; x += 0.175) lineW(x, 0, -AISLE, x, 0, AISLE); ctx.stroke();
+      // project the boxes and sort them far to near
+      for (let b = 0; b < NBOX; b++) {
+        const B = boxes[b], P = bp[b];
+        for (let c = 0; c < 8; c++) { proj(c & 1 ? B.x1 : B.x0, c & 2 ? B.y1 : B.y0, c & 4 ? B.z1 : B.z0); P[2 * c] = qx; P[2 * c + 1] = qy; }
+        proj((B.x0 + B.x1) / 2, (B.y0 + B.y1) / 2, (B.z0 + B.z1) / 2); bd[b] = qz;
+      }
+      border.sort((a, b) => bd[b] - bd[a]);
+      const sd = border.map((b) => bd[b]);
+      // additive items
+      let m = 0;
+      const add = (x, y, z, rad, a, s) => { proj(x, y, z); if (qz < 0.5) return; const fog = Math.min(1, Math.max(0.3, 1.35 - (qz - 8) / 12)); ix[m] = qx; iy[m] = qy; iz[m] = qz; ir[m] = (F * rad) / qz; ia[m] = a * fog; is[m] = s; m++; };
+      for (let i = 0; i < n; i++) {
+        const p = ph[i]; if (p === 3) continue;
+        const a = p === 0 ? 0.2 : p === 1 ? Math.min(0.9, Math.max(0.2, 0.25 + py[i] * 2.5)) : p === 6 ? 0.6 : 0.85;
+        add(px[i], py[i], pz[i], 0.12, a, Math.round(pT[i] * (NB - 1)));
+      }
+      for (let i = 0; i < LEAKN; i++) add(lx[i], ly[i], lz[i], 0.13, 0.55 * Math.sin(Math.PI * ll[i]), Math.round(0.5 * (NB - 1)));
+      for (let b = 0; b < 2 * NR; b++) {
+        const B = boxes[b], xc = (B.x0 + B.x1) / 2, back = B.sg > 0 ? B.z1 + 0.45 : B.z0 - 0.45;
+        add(xc, 1.1, back, 1.1, (0.32 + 0.12 * Math.sin(t * 2.3 + b * 1.7)) * B.heat, HOTG);
+        add(xc, 2.4, back + 0.3 * B.sg, 0.9, 0.18 + 0.08 * Math.sin(t * 1.7 + b), HOTG);
+      }
+      for (let k = 0; k < NR; k++) add(-RX + (k + 0.5) * RW, 0.35, 0, 0.75, 0.3 + 0.08 * Math.sin(t * 1.9 + k), COLDG);
+      for (const d of [-1, 1]) add(d * (UX - 0.15), 0.6, 0, 1.3, 0.35, COLDG);
+      // counting sort of items into the gaps between boxes (additive blending needs no order inside a gap)
+      cnt.fill(0);
+      for (let i = 0; i < m; i++) { let lo = 0, hi = NBOX; const z = iz[i]; while (lo < hi) { const mid = (lo + hi) >> 1; if (sd[mid] > z) lo = mid + 1; else hi = mid; } ib[i] = lo; cnt[lo + 1]++; }
+      for (let b = 1; b <= NBOX + 1; b++) cnt[b] += cnt[b - 1];
+      for (let i = 0; i < m; i++) ord[cnt[ib[i]]++] = i;
+      // after the placement pass cnt[b] is the end of gap b
+      let j = 0;
+      for (let g = 0; g <= NBOX; g++) {
+        ctx.globalCompositeOperation = "lighter";
+        for (const end = cnt[g]; j < end; j++) { const i = ord[j], r = ir[i]; if (ia[i] <= 0.01) continue; ctx.globalAlpha = Math.min(1, ia[i]); ctx.drawImage(SPR[is[i]], ix[i] - r, iy[i] - r, 2 * r, 2 * r); }
+        ctx.globalAlpha = 1;
+        if (g < NBOX) drawBox(border[g], t, dpr);
+      }
+      // labels that fade in and out one after another
+      ctx.globalCompositeOperation = "source-over"; ctx.font = `600 ${Math.round(12 * dpr)}px Public Sans, system-ui, sans-serif`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+      LABELS.forEach((L, k) => {
+        const u = (((t - k * 4.2) % 25.2) + 25.2) % 25.2 / 7.5; if (u >= 1) return;
+        proj(L.p[0], L.p[1], L.p[2]); if (qz < 1) return;
+        const a = Math.min(1, Math.sin(Math.PI * u) * 1.8) * Math.min(1, Math.max(0, (qx / W - 0.4) * 6)); if (a <= 0.02) return;
+        const lift = 22 * dpr;
+        ctx.globalAlpha = a; ctx.strokeStyle = `rgba(${L.c},.7)`; ctx.lineWidth = dpr; ctx.beginPath(); ctx.moveTo(qx, qy); ctx.lineTo(qx, qy - lift); ctx.lineTo(qx + 8 * dpr, qy - lift); ctx.stroke();
+        ctx.fillStyle = `rgba(${L.c},1)`; ctx.beginPath(); ctx.arc(qx, qy, 2.5 * dpr, 0, TAU); ctx.fill();
+        ctx.fillText(L.t, qx + 12 * dpr, qy - lift);
+      });
+      ctx.globalAlpha = 1;
+      // keep the left side calm for the title
+      ctx.fillStyle = vgGrad; ctx.fillRect(0, 0, W, H);
+    }
+    // fill the hall with air before the first frame
+    for (let k = 0; k < 260; k++) step(0.1, k * 0.1, MAXN);
+    const T0 = 26;
+    if (still) {
+      let size = "";
+      const tick = (now) => { if (!alive) return; const s = cv.width + "x" + cv.height; if (s !== size || now - last > 1000) { size = s; last = now; frame(T0, 0); } raf = requestAnimationFrame(tick); };
+      raf = requestAnimationFrame(tick);
+    } else {
+      const tick = (now) => { if (!alive) return; if (!t0) { t0 = now; last = now; } const dt = Math.min(0.05, (now - last) / 1000); last = now; frame(T0 + (now - t0) / 1000, dt); raf = requestAnimationFrame(tick); };
+      raf = requestAnimationFrame(tick);
+    }
+    return () => { alive = false; cancelAnimationFrame(raf); };
+  }
+
+  window._lab1 = { day, run, agents, evalMany, scoreDays, learnModel, refCost, refLog, PRACTICE, TRUE, GUESS, TOUR };
+  Lab.init({
+    title: "Lab 1: Intelligent agents", steps, footer: "Thursday, week 1. Slides: Intelligent Agents.",
+    welcome: {
+      kicker: "Lab 1 · Intelligent agents",
+      title: "Keep the servers cool, cheaply",
+      lead: "2 MW of servers turn electricity into heat, all day long. You will build an agent that decides every 10 minutes how hard to run the cooling, keeping the racks under 27 °C at the lowest possible cost.",
+      scene: hallScene,
+    },
+  });
+})();
+
+</script>
+</body>
+</html>

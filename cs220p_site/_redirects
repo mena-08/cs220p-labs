@@ -1,0 +1,11 @@
+# Retired URLs from the two-version site: send them to the single shared version.
+/lab1_student.html /lab1 301
+/lab2_student.html /lab2 301
+/lab3_student.html /lab3 301
+/lab4_student.html /lab4 301
+/lab1_student /lab1 301
+/lab2_student /lab2 301
+/lab3_student /lab3 301
+/lab4_student /lab4 301
+/ta/* / 301
+/ta%2F* / 301

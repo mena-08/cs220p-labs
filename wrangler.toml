@@ -1,0 +1,10 @@
+# Public site (cs220p-labs): the lab pages in dist/ and the tournament API in functions/.
+# Build first: node build.mjs. Deploy: npx wrangler pages deploy
+name = "cs220p-labs"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cs220p-tournament"
+database_id = "3bfd8f4a-f9de-4435-a691-5ce2f2081160"

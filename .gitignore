@@ -1,0 +1,12 @@
+# secrets: the admin token lives only on this machine and in Cloudflare
+.dev.vars
+# build outputs (node build.mjs regenerates them)
+dist/
+dist_ta/
+functions/_generated/
+# local tooling and leftovers
+.wrangler/
+node_modules/
+scratch/
+*.zip
+.DS_Store

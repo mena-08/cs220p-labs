@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS220P Lab 4: Similarity and distance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<script src="lab.js"></script>
+<script>
+window.LAB_TASKS = {
+why: `Name four kinds of information you would compare between a new pump trip and past failures, and give the attribute type of each.`,
+minkowski: `Move y to (7, 8). Compute the Manhattan and Euclidean distances by hand, then check. Find a position where the ranking of p2 and p4 from p1 changes between r = 1 and r = ∞.`,
+metric: `Answer the six questions. For the set-difference example, write the two sets that break symmetry. In the playground, find a position of y where squared Euclidean breaks the triangle inequality.`,
+scaling: `Pick a bearing-wear or cavitation trip. Record its nearest past trip and that trip's root cause, raw and standardized. Then set sensor weights for diagnosis and record the share of correct diagnoses over all 60 trips.`,
+binary: `Compute SMC and Jaccard by hand for Trip 1 and Trip 2 from the alarm table, then check. Add 200 silent alarm tags and explain what happens to each measure.`,
+cosine: `Write a short technician note for a fault of your choice and check which failure mode ranks first. Toggle stop words and note which ranks change. Explain why Euclidean distance would favor short notes.`,
+correlation: `Set offset 5, gain 2, noise 0: record correlation, Euclidean and cosine. Then set gain −1. Which measure would you use to match a vibration trend against known failure signatures, and which to check an alarm limit?`,
+mahalanobis: `Move the probe along the pump curve, then off it, and record both distances each time. Which distance should the condition-monitoring alarm use?`,
+tournament: `Build the combined similarity, practice on the three rounds, then do your single official run and send the code to the TA.`,
+};
+
+window.LAB_DEEPER = {
+minkowski: `<p>d<sub>r</sub>(x, y) = ‖x − y‖<sub>r</sub> is induced by the ℓ<sub>r</sub> norm, and the unit balls are nested: the ℓ<sub>1</sub> diamond ⊂ ℓ<sub>2</sub> disc ⊂ ℓ<sub>∞</sub> square, so d<sub>∞</sub> ≤ d<sub>2</sub> ≤ d<sub>1</sub> ≤ √p·d<sub>2</sub>. For r < 1 the triangle inequality fails and ‖·‖<sub>r</sub> is not a norm, although fractional "distances" are sometimes used in high dimensions because they concentrate less. Neighbor rankings can change with r: when attributes are many and differences are spread out, ℓ<sub>1</sub> is often preferable to ℓ<sub>2</sub>.</p>`,
+metric: `<p>Why metrics matter algorithmically: with the triangle inequality, |d(q, p) − d(p, x)| ≤ d(q, x) gives lower bounds that let kd-trees, ball trees and metric trees prune candidates without computing distances. Proofs worth knowing: the angle arccos(cos(x, y)) is a metric on the sphere; 1 − J(A, B) (Jaccard distance) is a metric (Marczewski-Steinhaus); 1 − cos is not (it fails the triangle inequality), though √(2(1 − cos)) is, being the chord length between unit vectors.</p>`,
+scaling: `<p>A weighted Euclidean distance √Σ w<sub>i</sub>(x<sub>i</sub> − y<sub>i</sub>)² is the Euclidean distance after the linear map diag(√w); standardization is the special case w<sub>i</sub> = 1/σ<sub>i</sub>². Mahalanobis (step 8) generalizes this to any positive-definite matrix: it is Euclidean distance after whitening by Σ<sup>−1/2</sup>. Metric learning methods (NCA, LMNN) learn the matrix from labeled pairs; your weight sliders are a one-dimensional version of that.</p>`,
+binary: `<p>SMC is 1 − Hamming/p and treats both states symmetrically; Jaccard is the ratio |A ∩ B| / |A ∪ B| on the supports and is the right measure when 1 is rare and informative (asymmetric attributes, sparse transaction data). As the catalog grows, SMC → 1 for everyone because f<sub>00</sub> dominates; Jaccard is invariant to shared zeros. MinHash estimates Jaccard from short signatures, which is how near-duplicate detection scales to the web.</p>`,
+cosine: `<p>With non-negative counts cos ∈ [0, 1]; it equals the dot product of the ℓ<sub>2</sub>-normalized vectors, so ‖x̂ − ŷ‖² = 2(1 − cos): cosine is Euclidean distance after projecting onto the unit sphere. Term weighting matters more than the measure: TF-IDF multiplies counts by log(N/df) so that words appearing in every document stop contributing, a smooth version of stop-word removal. For long documents sublinear tf (1 + log tf) prevents a single repeated term from dominating. In dense embedding spaces (word2vec, sentence transformers) cosine remains the default for the same scale-invariance reason.</p>`,
+correlation: `<p>Pearson's correlation is the cosine of the mean-centered vectors: corr(x, y) = cos(x − x̄, y − ȳ). It is invariant to affine transformations of either variable, which is why offset and gain do not change it, and it measures linear association only (Anscombe's quartet). Spearman's rank correlation applies Pearson to ranks and is the permissible choice for ordinal data. As a dissimilarity for time series, 1 − corr ignores level and amplitude; dynamic time warping additionally tolerates temporal misalignment.</p>`,
+mahalanobis: `<p>D<sub>M</sub>²(x, μ) = (x − μ)ᵀΣ<sup>−1</sup>(x − μ) is the exponent of the multivariate Gaussian density, so contours of constant D<sub>M</sub> are equiprobability ellipsoids; under Gaussianity D<sub>M</sub>² follows a χ² distribution with p degrees of freedom, which gives a principled outlier threshold. It is Euclidean distance in the whitened coordinates Σ<sup>−1/2</sup>(x − μ) and reduces to standardized Euclidean when Σ is diagonal. Its weakness is Σ itself: estimated from data containing outliers it is distorted, hence robust covariance estimators (MCD).</p>`,
+};
+
+/* Lab 4: Measures of similarity and distance. Scenario: a pump trips at a gas plant; diagnose it from the most similar past failure */
+(function () {
+  const { h, RNG, fmt, mean, sd, range, select, check, metric, canvas, css, quiz, tournament, clamp, examples, callout, tween, sleep, pulse } = Lab;
+  /* small helpers: approximate equality (ties), an animation-frame loop, replacing a box's content */
+  const near = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  function frames(step) { let on = false, last = 0; const f = (now) => { const dt = Math.min(64, now - last); last = now; on = step(dt); if (on) requestAnimationFrame(f); }; return () => { if (!on) { on = true; last = performance.now(); requestAnimationFrame(f); } }; }
+  const showIn = (box, ...kids) => { box.innerHTML = ""; kids.flat().filter(Boolean).forEach((k) => box.append(k)); };
+
+  /* ---- distance toolkit ---- */
+  const minkowski = (a, b, r) => r === Infinity ? Math.max(...a.map((x, i) => Math.abs(x - b[i]))) : Math.pow(a.reduce((s, x, i) => s + Math.pow(Math.abs(x - b[i]), r), 0), 1 / r);
+  const euclid = (a, b) => minkowski(a, b, 2), manhattan = (a, b) => minkowski(a, b, 1), supremum = (a, b) => minkowski(a, b, Infinity);
+  const dot = (a, b) => a.reduce((s, x, i) => s + x * b[i], 0), norm = (a) => Math.sqrt(dot(a, a));
+  const cosine = (a, b) => (norm(a) && norm(b) ? dot(a, b) / (norm(a) * norm(b)) : 0);
+  const extJaccard = (a, b) => dot(a, b) / (dot(a, a) + dot(b, b) - dot(a, b) || 1);
+  function binCounts(a, b) { let f00 = 0, f01 = 0, f10 = 0, f11 = 0; a.forEach((x, i) => { const y = b[i]; if (x && y) f11++; else if (x) f10++; else if (y) f01++; else f00++; }); return { f00, f01, f10, f11 }; }
+  const smc = (a, b) => { const f = binCounts(a, b); return (f.f00 + f.f11) / a.length; };
+  const jaccard = (a, b) => { const f = binCounts(a, b); return f.f11 + f.f01 + f.f10 ? f.f11 / (f.f11 + f.f01 + f.f10) : 1; };
+  const pearson = (a, b) => { const ma = mean(a), mb = mean(b); let sab = 0, saa = 0, sbb = 0; a.forEach((x, i) => { sab += (x - ma) * (b[i] - mb); saa += (x - ma) ** 2; sbb += (b[i] - mb) ** 2; }); return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0; };
+  const zscore = (cols) => cols.map((c) => { const m = mean(c), s = sd(c) || 1; return c.map((x) => (x - m) / s); });
+  const STOP = new Set("a an the and or of to in for with on at by from as is are was were be been this that these those it its i my we our you your they their have has had do does did will would can could should may might not no but if then than so such very also into over under about up out more most less".split(" "));
+  const tokens = (text, stop) => text.toLowerCase().replace(/[^a-z0-9+#\s]/g, " ").split(/\s+/).filter((w) => w && (!stop || !STOP.has(w)));
+  function bow(docs, stop) { const vocab = new Map(); docs.forEach((d) => tokens(d, stop).forEach((w) => vocab.has(w) || vocab.set(w, vocab.size))); const vecs = docs.map((d) => { const v = new Array(vocab.size).fill(0); tokens(d, stop).forEach((w) => v[vocab.get(w)]++); return v; }); return { vocab: [...vocab.keys()], vecs }; }
+
+  /* ---- synthetic maintenance history: centrifugal pump trips with a known root cause ---- */
+  const NUM = ["vibration_mm_s", "bearing_temp_C", "pressure_bar", "flow_m3h"];
+  const NUM_LABEL = { vibration_mm_s: "vibration (mm/s)", bearing_temp_C: "bearing temp (°C)", pressure_bar: "pressure (bar)", flow_m3h: "flow (m³/h)" };
+  const CODES = ["High vibration", "High bearing temperature", "Low suction pressure", "Cavitation noise", "Seal leak", "Seal pot level low", "High coupling temperature", "Motor overcurrent", "Power dip", "Low discharge pressure", "High discharge temperature", "Filter ΔP high"];
+  const CODE_SHORT = ["Vib", "BrgT", "SucP", "Cav", "Leak", "Pot", "CplT", "OvrC", "Dip", "DisP", "DisT", "Filt"];
+  const CAUSES = {
+    bearing: { label: "Bearing wear", color: "#5b7cfa", num: [[7, 1.5], [95, 6], [45, 4], [380, 110]], codes: [0, 1],
+      words: ["grinding noise at the drive end bearing", "bearing housing too hot to touch", "grease looks dark and discolored", "rumbling that gets worse with speed", "bearing temperature alarm kept coming back"] },
+    cavitation: { label: "Cavitation", color: "#ee8a84", num: [[5.5, 1.5], [70, 6], [32, 5], [470, 90]], codes: [2, 3],
+      words: ["crackling noise like gravel inside the casing", "suction pressure gauge fluctuating", "suction strainer partly blocked", "impeller shows pitting", "discharge flow unstable and surging"] },
+    seal: { label: "Seal failure", color: "#3fae8a", num: [[3, 1], [78, 6], [41, 4], [380, 110]], codes: [4, 5],
+      words: ["liquid dripping from the mechanical seal", "puddle under the seal gland", "seal flush line blocked", "seal pot level dropping fast", "product smell near the seal"] },
+    misalignment: { label: "Misalignment", color: "#e0a83a", num: [[6.5, 1.5], [86, 6], [45, 4], [380, 110]], codes: [0, 6],
+      words: ["coupling guard hot after a few hours", "high axial vibration at the coupling", "motor was replaced last week and alignment was not checked", "loose foundation bolts on the baseplate", "coupling rubber elements worn"] },
+    electrical: { label: "Motor electrical fault", color: "#8f7fe8", num: [[3.5, 1], [72, 6], [37, 5], [270, 90]], codes: [7, 8],
+      words: ["motor tripped on overcurrent", "breaker tripped twice during start", "burned smell from the motor terminal box", "insulation test low on one winding", "voltage dip recorded on the feeder"] },
+  };
+  const CAUSE_KEYS = Object.keys(CAUSES);
+  const FILLER = ["Operator reported the problem on the night shift and the pump was stopped.", "The area was checked by the shift supervisor and a work order was raised.", "The spare pump was started and the unit was isolated for the maintenance team.", "This is the second time this month that the pump has been reported."];
+  const cap = (s) => s[0].toUpperCase() + s.slice(1);
+  function makeTrip(rng, id, cause) {
+    const c = CAUSES[cause], x = {};
+    NUM.forEach((k, j) => { const [m, s] = c.num[j]; x[k] = +Math.max(0, rng.normal(m, s * NOISE.numScale)).toFixed(k === "flow_m3h" ? 0 : 1); });
+    const falseRate = rng() < NOISE.flood ? NOISE.floodFalse : NOISE.codeFalse;   // some trips set off an alarm flood: many unrelated alarms at once
+    const codes = CODES.map((_, k) => (rng() < (c.codes.includes(k) ? NOISE.codeHit : falseRate) ? 1 : 0));
+    const alarms = codes.concat(Array.from({ length: NOISE.otherTags }, () => (rng() < falseRate / 3 ? 1 : 0)));   // all alarm tags of the unit: the 12 above plus others that rarely fire
+    const own = rng.shuffle(c.words).slice(0, NOISE.own), other = rng() < NOISE.other ? [rng.pick(CAUSES[rng.pick(CAUSE_KEYS.filter((k) => k !== cause))].words)] : [];
+    const note = rng.shuffle(own.concat(other)).map(cap).join(". ") + ". " + rng.shuffle(FILLER).slice(0, NOISE.filler[0] + rng.int(NOISE.filler[1] - NOISE.filler[0] + 1)).join(" ");
+    return { id, tag: "P-" + (101 + rng.int(40)) + "ABC"[rng.int(3)], cause, ...x, codes, alarms, note };
+  }
+  function history(seed, n) { const rng = RNG(seed); return rng.shuffle(Array.from({ length: n }, (_, i) => CAUSE_KEYS[i % CAUSE_KEYS.length])).map((cause, i) => makeTrip(rng, i, cause)); }
+  /* how noisy a trip record is: symptom phrases from its own cause, chance of one misleading phrase, alarm hit rate, false-alarm rate (normal and during an alarm flood), filler sentences, sensor spread */
+  const NOISE = { own: 1, other: 0.5, codeHit: 0.6, codeFalse: 0.03, flood: 0.3, floodFalse: 0.35, otherTags: 48, filler: [2, 3], numScale: 1.3 };
+  const HIST = history(4, 60);
+  const tripName = (c) => `Trip ${c.id + 1} (${c.tag})`;
+  const codeList = (codes) => codes.map((v, k) => (v ? CODES[k] : null)).filter(Boolean).join(", ") || "none";
+
+  /* ---- drawing ---- */
+  function plane(cv, pts, opts = {}) {
+    const ctx = cv.getContext("2d"), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+    const pad = 36; const lo = opts.min ?? 0, hi = opts.max ?? 10;
+    const X = (x) => pad + ((x - lo) / (hi - lo)) * (W - 2 * pad), Y = (y) => H - pad - ((y - lo) / (hi - lo)) * (H - 2 * pad);
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 1; for (let g = lo; g <= hi; g += (hi - lo) / 10) { ctx.beginPath(); ctx.moveTo(X(g), Y(lo)); ctx.lineTo(X(g), Y(hi)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(X(lo), Y(g)); ctx.lineTo(X(hi), Y(g)); ctx.stroke(); }
+    ctx.font = "12px Public Sans"; ctx.fillStyle = css("--muted"); ctx.fillText(opts.xlabel || "x", W - pad - 10, H - 8); ctx.fillText(opts.ylabel || "y", 6, pad - 8);
+    (opts.shapes || []).forEach((s) => { ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 2; ctx.setLineDash(s.dash || []); ctx.beginPath(); s.pts.forEach((p, i) => (i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])))); if (s.close) ctx.closePath(); ctx.stroke(); ctx.setLineDash([]); });
+    pts.forEach((p) => { ctx.fillStyle = p.color || css("--lagoon"); ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), p.r || 6, 0, 7); ctx.fill(); if (p.label) { ctx.fillStyle = css("--ink"); ctx.font = "bold 12px Public Sans"; ctx.fillText(p.label, X(p.x) + 9, Y(p.y) - 6); } });
+    return { X, Y };
+  }
+  function matrixTable(labels, M, f = (v) => fmt(v, 2), hi = null) {
+    const t = h("table", {}, h("tr", {}, h("th", {}, ""), ...labels.map((l) => h("th", {}, l))));
+    labels.forEach((l, i) => t.append(h("tr", {}, h("th", {}, l), ...labels.map((_, j) => h("td", { style: hi && hi(i, j) ? "background:var(--sand);font-weight:600" : "" }, i === j ? "–" : f(M[i][j]))))));
+    return h("div", { class: "wide" }, t);
+  }
+  const causeLegend = () => h("div", { class: "legend" }, ...CAUSE_KEYS.map((k) => h("span", {}, h("i", { style: `background:${CAUSES[k].color}` }), CAUSES[k].label)));
+
+  const steps = [];
+  steps.push({
+    id: "why", title: "Why similarity? A pump trips", time: 10,
+    theory: `<h3>Have we seen this failure before?</h3>
+      <p>A gas plant runs dozens of centrifugal pumps. When one trips, the reliability engineer's first question is: <b>which past failure looks most like this one?</b> If the most similar past trip was a worn bearing, check the bearing first. This is <b>case-based diagnosis</b>, and the same question drives recommendations, duplicate detection, clustering and anomaly alarms: each needs a number that says how alike two objects are. A <b>similarity</b> is a numerical measure of how alike two objects are, usually in [0, 1] with 1 for identical. A <b>dissimilarity</b> or <b>distance</b> measures how different they are, 0 for identical, with no fixed upper bound. The two are interchangeable with a transformation such as s = 1 / (1 + d) or s = 1 − d / d<sub>max</sub>.</p>
+      <p>Each trip in our maintenance history has sensor readings at the trip (vibration, bearing temperature, discharge pressure, flow), the set of alarm codes that fired (binary), the technician's free-text note, and the root cause found after the repair. The right measure depends on the attribute type: differences for interval and ratio attributes, ranks for ordinal, matching for nominal and binary, angles for sparse count vectors such as text. We will find the most similar past trip three different ways, then combine them.</p>`,
+    ask: `<div class='a'>Ask: "A pump trips. What would you compare with past failures?" Collect answers on the board: the sensor readings (numeric), which alarms fired (binary), what the technician wrote (text), the vibration trend before the trip (a time series). Each needs a different measure; the lab goes through them in that order.</div>
+      <div class='a'>Point at the root-cause column: the history is labeled, so we can check whether "most similar" actually gives the right diagnosis. That is exactly what the tournament scores.</div>
+      <div class='a'>Use the examples: two bearing-wear trips, then bearing wear against a seal failure. The four numbers under the bars preview the measures of the next steps. The edge case compares a trip with itself (distance 0, similarity 1): a retrieval system must leave the query out of the history.</div>`,
+    mount() {
+      let ia = 0, ib = 1;
+      const ZS = zscore(NUM.map((k) => HIST.map((c) => c[k]))), MAX = NUM.map((k) => Math.max(...HIST.map((c) => c[k])));
+      const cv = canvas(760, 226), info = h("div"), msg = h("div"), stats = h("div", { class: "metrics" });
+      const frac = (i) => NUM.map((k, j) => HIST[i][k] / MAX[j]);
+      let cur = null, tok = 0;
+      function drawBars(v) {
+        const ctx = cv.getContext("2d"), W = cv.width, L = 150, bw = W - L - 110; ctx.clearRect(0, 0, W, cv.height); ctx.font = "12px Public Sans";
+        NUM.forEach((k, j) => {
+          const y0 = 12 + j * 54; ctx.fillStyle = css("--ink-2"); ctx.fillText(NUM_LABEL[k], 6, y0 + 18);
+          [[v[0][j], css("--lagoon"), HIST[ia][k], "A"], [v[1][j], css("--coral"), HIST[ib][k], "B"]].forEach(([f, col, val, nm], s) => {
+            ctx.fillStyle = css("--line"); ctx.fillRect(L, y0 + s * 18, bw, 14);
+            ctx.fillStyle = col; ctx.fillRect(L, y0 + s * 18, clamp(f, 0, 1) * bw, 14);
+            ctx.fillStyle = css("--ink"); ctx.fillText(`${nm}: ${val}`, L + bw + 8, y0 + 11 + s * 18);
+          });
+        });
+      }
+      function update() {
+        const to = [frac(ia), frac(ib)], from = cur || to, my = ++tok;
+        tween(550, (t) => { if (my !== tok) return; cur = from.map((r, s) => r.map((x, j) => x + (to[s][j] - x) * t)); drawBars(cur); });
+        const A = HIST[ia], B = HIST[ib];
+        const dz = euclid(NUM.map((_, j) => ZS[j][ia]), NUM.map((_, j) => ZS[j][ib]));
+        const f = binCounts(A.codes, B.codes), uni = f.f11 + f.f10 + f.f01;
+        const { vocab, vecs } = bow([A.note, B.note], true), shared = vocab.filter((w, k) => vecs[0][k] && vecs[1][k]);
+        showIn(stats, metric("Sensors: standardized Euclidean", fmt(dz, 2)), metric("Alarm codes: Jaccard", uni ? fmt(f.f11 / uni, 2) : "0/0"), metric("Notes: cosine", fmt(cosine(vecs[0], vecs[1]), 2)), metric("Root cause", A.cause === B.cause ? "same" : "different", A.cause === B.cause ? "good" : "bad"));
+        const chips = CODES.map((c, k) => (A.codes[k] || B.codes[k] ? h("span", { class: "badge" + (A.codes[k] && B.codes[k] ? "" : " warn"), style: "margin:0 .3rem .3rem 0" }, `${c}: ${A.codes[k] && B.codes[k] ? "both" : A.codes[k] ? "A only" : "B only"}`) : null)).filter(Boolean);
+        showIn(info, h("p", {}, h("b", {}, "A: "), `${tripName(A)}, ${CAUSES[A.cause].label}. `, h("span", { class: "note" }, A.note)), h("p", {}, h("b", {}, "B: "), `${tripName(B)}, ${CAUSES[B.cause].label}. `, h("span", { class: "note" }, B.note)),
+          h("div", {}, h("b", {}, "Alarm codes: "), chips.length ? chips : "neither trip raised any of the 12 codes"), h("p", {}, h("b", {}, "Shared words (stop words removed): "), shared.join(", ") || "none"));
+        showIn(msg, ia === ib ? callout("A and B are the same trip. Every sensor difference is 0, every alarm and every word is shared: distance 0, similarity 1. When we search the history for the most similar trip, we must leave the trip itself out, or every trip is its own best match.", "edge")
+          : !uni ? callout("Neither trip raised an alarm code, so the Jaccard similarity is 0/0: undefined. Step 5 looks at this case.", "edge") : null);
+      }
+      const opts = HIST.map((c) => ({ value: c.id, label: `${tripName(c)}: ${CAUSES[c.cause].label}` }));
+      const aCtl = select({ label: "Trip A", options: opts, value: ia, onchange: (v) => { ia = +v; update(); } });
+      const bCtl = select({ label: "Trip B", options: opts, value: ib, onchange: (v) => { ib = +v; update(); } });
+      const firstOf = (cause, not = -1) => HIST.find((c) => c.cause === cause && c.id !== not && c.codes.some(Boolean)).id;
+      const b0 = firstOf("bearing"), b1 = firstOf("bearing", b0), s0 = firstOf("seal");
+      const ex = examples([
+        { label: "Two bearing-wear trips", note: "A and B both had a worn bearing. Watch the bars slide to the new trips and the four numbers update. Some evidence agrees and some does not, so we need one number per kind of data.", run: async () => { aCtl.apply(b0); await sleep(900); bCtl.apply(b1); await sleep(900); } },
+        { label: "Bearing wear vs seal failure", note: "A stays a bearing-wear trip; B becomes a seal failure. Watch which bars move, which alarm chips change and which shared words remain.", run: async () => { aCtl.apply(b0); await sleep(700); bCtl.apply(s0); await sleep(900); } },
+        { label: "A trip compared with itself", kind: "edge", note: "B becomes A. The bars meet exactly: distance 0, Jaccard 1, cosine 1.", run: async () => { aCtl.apply(s0); await sleep(700); bCtl.apply(s0); await sleep(900); } },
+      ]);
+      update();
+      const t = h("table", {}, h("tr", {}, h("th", {}, "Trip"), ...NUM.map((k) => h("th", {}, NUM_LABEL[k])), h("th", {}, "alarm codes"), h("th", {}, "technician note"), h("th", {}, "root cause")));
+      HIST.slice(0, 8).forEach((c) => t.append(h("tr", {}, h("td", {}, tripName(c)), ...NUM.map((k) => h("td", {}, c[k])), h("td", { class: "note" }, codeList(c.codes)), h("td", { class: "note" }, c.note), h("td", {}, CAUSES[c.cause].label))));
+      return h("div", {}, ex,
+        h("div", { class: "lab" }, h("div", { class: "controls" }, aCtl, bCtl, h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--lagoon)" }), "Trip A"), h("span", {}, h("i", { style: "background:var(--coral)" }), "Trip B")), h("p", { class: "note" }, "Bars are scaled to the largest value in the history.")), h("div", { class: "stage" }, cv, stats, msg, info)),
+        h("h3", {}, "The first 8 trips of the history"),
+        h("div", { class: "wide" }, t, h("p", { class: "note" }, `52 more trips. The table shows the 12 alarm codes that matter for these faults: ${CODES.join(", ")}. The unit has 48 more alarm tags that rarely fire; the tournament compares all 60.`)));
+    },
+  });
+
+  steps.push({
+    id: "minkowski", title: "Euclidean, Manhattan, supremum: the Minkowski family", time: 15,
+    theory: `<h3>d(x, y) = (Σ |x<sub>i</sub> − y<sub>i</sub>|<sup>r</sup>)<sup>1/r</sup></h3>
+      <ul><li>r = 1: <b>city block / Manhattan</b> (L<sub>1</sub>): walk along the grid; the total deviation summed over all sensors.</li>
+      <li>r = 2: <b>Euclidean</b> (L<sub>2</sub>): the straight line.</li>
+      <li>r = ∞: <b>supremum</b> (L<sub>max</sub>): the largest single-attribute difference, the way alarm limits work: one sensor out of range is enough.</li></ul>
+      <p>Hamming distance is L<sub>1</sub> on binary codes. The dashed shapes show all points at distance 3 from the red point for r = 1, 2 and ∞: a diamond, a circle, a square. The solid blue shape is the same set for the current r: slide r and watch it morph. Below r = 1 it caves in, and the formula stops being a metric. The point y is also p2 of a small dataset; the <b>distance matrix</b> on the right holds all pairwise distances, which is what clustering algorithms consume.</p>`,
+    ask: `<div class='a'>Ask: when is Manhattan the "true" distance? (a forklift driving along the aisles of a warehouse; the total deviation summed over sensors). When does supremum make sense? (alarm limits: the single worst sensor decides whether the pump trips). Note that the order of neighbors can differ between r values.</div>
+      <div class='a'>Run "The ranking flips with r": y = (9, 5); from p1, p2 is at 7 and p4 at 8 for r = 1, but p2 is at 6 and p4 at 5 for r = ∞. Then the edge cases: y on x (0 for every r), the tie at y = (7, 4) with r = ∞ (p2 and p3 both at 4), and r = 0.5, where a detour through another point is shorter than the direct route.</div>`,
+    mount() {
+      let r = 2, bx = 7, by = 5;
+      const R_INF = 10.5, rOf = (v) => (v >= R_INF - 1e-6 ? Infinity : +v.toFixed(2)), rTxt = (x) => (x === Infinity ? "∞" : fmt(x, 2));
+      const cv = canvas(420, 420), out = h("div", { class: "metrics" }), mat = h("div"), msg = h("div");
+      const A = [3, 4], P3 = [2, 8], P4 = [8, 1], names = ["p1", "p2", "p3", "p4"];
+      const shape = (rr) => { const pts = []; for (let k = 0; k <= 144; k++) { const t = (k / 144) * 2 * Math.PI, x = Math.cos(t), y = Math.sin(t); const n = rr === Infinity ? Math.max(Math.abs(x), Math.abs(y)) : Math.pow(Math.pow(Math.abs(x), rr) + Math.pow(Math.abs(y), rr), 1 / rr); pts.push([A[0] + (3 * x) / n, A[1] + (3 * y) / n]); } return pts; };
+      function redraw() {
+        const B = [bx, by], P = [A, B, P3, P4];
+        plane(cv, [{ x: P3[0], y: P3[1], color: css("--muted"), r: 5, label: "p3" }, { x: P4[0], y: P4[1], color: css("--muted"), r: 5, label: "p4" }, { x: A[0], y: A[1], color: css("--coral"), label: "x = p1" }, { x: bx, y: by, color: css("--lagoon"), label: `y = p2 (${bx}, ${by})` }],
+          { shapes: [{ pts: shape(1), color: css("--sand-2"), dash: [4, 3] }, { pts: shape(2), color: css("--mint-2"), dash: [4, 3] }, { pts: shape(Infinity), color: css("--muted"), dash: [4, 3] }, { pts: shape(r), color: css("--lagoon"), width: 3 }, { pts: [A, [bx, A[1]], B], color: css("--sand-2") }, { pts: [A, B], color: css("--mint-2") }] });
+        const M = P.map((p) => P.map((q) => minkowski(p, q, r)));
+        showIn(out, metric("Manhattan (r = 1)", fmt(manhattan(A, B), 2)), metric("Euclidean (r = 2)", fmt(euclid(A, B), 2)), metric("Supremum (r = ∞)", fmt(supremum(A, B), 2)), metric(`Minkowski r = ${rTxt(r)}`, fmt(M[0][1], 2), r < 1 ? "bad" : ""));
+        const dmin = Math.min(M[0][1], M[0][2], M[0][3]), nn = [1, 2, 3].filter((j) => near(M[0][j], dmin));
+        const order = near(M[0][1], M[0][3]) ? `p2 and p4 tie at ${fmt(M[0][1], 2)}` : M[0][1] < M[0][3] ? `p2 is closer than p4 (${fmt(M[0][1], 2)} vs ${fmt(M[0][3], 2)})` : `p4 is closer than p2 (${fmt(M[0][3], 2)} vs ${fmt(M[0][1], 2)})`;
+        showIn(mat, h("h3", {}, `Distance matrix, r = ${rTxt(r)}`), matrixTable(names, M, (v) => fmt(v, 2), (i, j) => (i === 0 && nn.includes(j)) || (j === 0 && nn.includes(i))), h("p", { class: "note" }, `From p1: ${order}. Nearest neighbor of p1: ${nn.map((j) => names[j]).join(" and ")} (highlighted).`));
+        let viol = null;
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) if (i !== j && j !== k && i !== k) { const gap = M[i][j] - M[i][k] - M[k][j]; if (gap > 1e-9 && (!viol || gap > viol.gap)) viol = { i, j, k, gap }; }
+        showIn(msg,
+          bx === A[0] && by === A[1] ? callout("y sits exactly on x. The distance is 0 for every r: positivity says d(x, y) = 0 exactly when x = y.", "edge") : null,
+          nn.length > 1 ? callout(`Tie: ${nn.map((j) => names[j]).join(" and ")} are both at distance ${fmt(dmin, 2)} from p1, so "the nearest neighbor" is not defined. A nearest-neighbor method needs a tie-breaking rule: lowest index, a vote, or a second distance.`, "edge") : null,
+          r < 1 ? callout(viol ? `r = ${rTxt(r)} is below 1: not a metric. d(${names[viol.i]}, ${names[viol.j]}) = ${fmt(M[viol.i][viol.j], 2)} is larger than d(${names[viol.i]}, ${names[viol.k]}) + d(${names[viol.k]}, ${names[viol.j]}) = ${fmt(M[viol.i][viol.k], 2)} + ${fmt(M[viol.k][viol.j], 2)}. The detour through ${names[viol.k]} is shorter than the direct route: the triangle inequality fails.` : `r = ${rTxt(r)} is below 1, so this is not a metric (the unit shape is not convex), although these four points happen to satisfy the triangle inequality right now. Move y to find a violation.`, "edge") : null);
+      }
+      const bxCtl = range({ label: "y: x-coordinate", min: 0, max: 10, step: 0.5, value: bx, onchange: (v) => { bx = v; redraw(); } });
+      const byCtl = range({ label: "y: y-coordinate", min: 0, max: 10, step: 0.5, value: by, onchange: (v) => { by = v; redraw(); } });
+      const rCtl = range({ label: "r (right end = ∞)", min: 0.5, max: R_INF, step: 0.1, value: r, fmt: (v) => (v >= R_INF - 1e-6 ? "∞" : v.toFixed(1)), onchange: (v) => { r = rOf(v); redraw(); } });
+      const presets = h("div", { class: "btns" }, ...[[1, "r = 1"], [2, "r = 2"], [R_INF, "r = ∞"]].map(([v, l]) => h("button", { class: "ghost", onclick: () => rCtl.animateTo(v, 900) }, l)));
+      const moveY = (x, y, ms = 900) => Promise.all([bxCtl.animateTo(x, ms), byCtl.animateTo(y, ms)]);
+      const ex = examples([
+        { label: "Morph r from 1 to ∞", note: "The solid blue shape is every point at distance 3 from x for the current r. It starts as the diamond (r = 1), swells into the circle (r = 2) and squares off as r grows. The Minkowski value slides from the Manhattan value down to the supremum value.", run: async () => { await moveY(7, 5, 600); await rCtl.animateTo(1, 700); await sleep(400); await rCtl.animateTo(2, 1500); await sleep(400); await rCtl.animateTo(R_INF, 2200); } },
+        { label: "The ranking flips with r", note: "y moves to (9, 5), then r glides from 1 to ∞. Watch the line under the matrix: at r = 1, p2 is closer to p1 (7 vs 8); at r = ∞, p4 is closer (5 vs 6). Which neighbor is nearest depends on the distance you choose.", run: async () => { await rCtl.animateTo(1, 600); await moveY(9, 5); await sleep(600); await rCtl.animateTo(R_INF, 2600); } },
+        { label: "y on top of x", kind: "edge", note: "y glides onto x = (3, 4). Every distance shrinks to exactly 0, and stays 0 while r sweeps.", run: async () => { await moveY(3, 4, 1400); await rCtl.animateTo(1, 700); await rCtl.animateTo(R_INF, 1200); } },
+        { label: "Tie for nearest neighbor", kind: "edge", note: "y = (7, 4) with r = ∞: p2 and p3 are both at distance 4 from p1, and both matrix cells light up. Then r glides to 2: for any finite r, p3's second difference adds to its distance and p2 wins.", run: async () => { await rCtl.animateTo(R_INF, 600); await moveY(7, 4); await sleep(1800); await rCtl.animateTo(2, 1500); } },
+        { label: "r < 1: not a metric", kind: "edge", note: "y moves to (7, 8) and r glides down to 0.5. The unit shape caves in to a star, and the panel below shows a detour through another point that is shorter than the direct route.", run: async () => { await rCtl.animateTo(2, 500); await moveY(7, 8); await rCtl.animateTo(0.5, 2400); } },
+      ]);
+      redraw();
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, bxCtl, byCtl, rCtl, presets), h("div", { class: "stage" }, h("div", { style: "display:grid;grid-template-columns:minmax(0,420px) 1fr;gap:1rem;align-items:start" }, cv, h("div", {}, out, mat)), msg)));
+    },
+  });
+
+  steps.push({
+    id: "metric", title: "What makes a distance a metric", time: 10,
+    theory: `<h3>Three properties</h3>
+      <ul><li><b>Positivity</b>: d(x, y) ≥ 0, and d(x, y) = 0 only if x = y.</li>
+      <li><b>Symmetry</b>: d(x, y) = d(y, x).</li>
+      <li><b>Triangle inequality</b>: d(x, z) ≤ d(x, y) + d(y, z).</li></ul>
+      <p>Metrics are what many algorithms assume (they let us prune: if x is far from y and y is close to z, x is far from z). Useful measures that are <i>not</i> metrics: the set difference "size of A − B" (not symmetric), the time distance d(1 PM, 2 PM) = 1 but d(2 PM, 1 PM) = 23 on a 24-hour clock, and similarity-based measures (cosine, Jaccard) which only satisfy positivity and symmetry, though they can be converted to a metric distance. An asymmetric similarity can be symmetrized with s'(x, y) = (s(x, y) + s(y, x)) / 2, as in the confusion matrix of people misreading 0 and o.</p>`,
+    ask: `<div class='a'>Ask for a real asymmetric relation in a plant: travel time up and down a steep access road; "failure A often leads to failure B" (a leaking seal can wreck a bearing, a worn bearing rarely causes a seal leak first). Then why the triangle inequality matters: with a metric, a case-retrieval system can skip comparing with past cases that are provably far.</div>
+      <div class='a'>Playground examples: squared Euclidean with y at the midpoint (5, 5) gives d(x, z) = 52 against 13 + 13; the uphill road gives different distances up and down; 1 − cosine gives distance 0 for the different points x = (2, 3) and y = (4, 6); the zero vector has no cosine at all. Stress that a passing check proves nothing, one failure disproves.</div>`,
+    mount() {
+      const X0 = [2, 3], Z0 = [8, 7]; let y = [5, 8], m = "euclid";
+      const zero = (v) => (Math.abs(v) < 1e-12 ? 0 : v), same = (a, b) => a[0] === b[0] && a[1] === b[1];
+      const D = {
+        euclid: { label: "Euclidean", d: (a, b) => euclid(a, b) },
+        manhattan: { label: "Manhattan", d: (a, b) => manhattan(a, b) },
+        sq: { label: "squared Euclidean", d: (a, b) => euclid(a, b) ** 2 },
+        mink: { label: "Minkowski r = 0.5", d: (a, b) => minkowski(a, b, 0.5) },
+        cos: { label: "1 − cosine (angle seen from the origin)", d: (a, b) => (norm(a) && norm(b) ? 1 - dot(a, b) / (norm(a) * norm(b)) : NaN) },
+        uphill: { label: "uphill road: Euclidean + 1 per unit climbed", d: (a, b) => euclid(a, b) + Math.max(0, b[1] - a[1]) },
+      };
+      const cv = canvas(420, 420), checks = h("div"), msg = h("div");
+      function redraw() {
+        const d = (a, b) => zero(D[m].d(a, b));
+        const dxy = d(X0, y), dyx = d(y, X0), dyz = d(y, Z0), dzy = d(Z0, y), dxz = d(X0, Z0), dzx = d(Z0, X0);
+        const undef = [dxy, dyx, dyz, dzy, dxz, dzx].some((v) => Number.isNaN(v));
+        let pos = null, sym = null, tri = null, equal = false;
+        if (!undef) {
+          const pairs = [["x", "y", X0, y, dxy], ["y", "z", y, Z0, dyz], ["x", "z", X0, Z0, dxz]];
+          const neg = pairs.find((p) => p[4] < 0), z0 = pairs.find((p) => p[4] === 0 && !same(p[2], p[3]));
+          pos = neg ? [false, `d(${neg[0]}, ${neg[1]}) < 0`] : z0 ? [false, `d(${z0[0]}, ${z0[1]}) = 0 although ${z0[0]} ≠ ${z0[1]}`] : [true, "all distances ≥ 0, and 0 only for equal points"];
+          const asym = [["x", "y", dxy, dyx], ["y", "z", dyz, dzy], ["x", "z", dxz, dzx]].find((p) => !near(p[2], p[3]));
+          sym = asym ? [false, `d(${asym[0]}, ${asym[1]}) = ${fmt(asym[2], 2)} but d(${asym[1]}, ${asym[0]}) = ${fmt(asym[3], 2)}`] : [true, "d(a, b) = d(b, a) for all three pairs"];
+          const rhs = dxy + dyz; equal = near(dxz, rhs);
+          tri = equal ? [true, `d(x, z) = ${fmt(dxz, 2)} = d(x, y) + d(y, z): holds with equality`] : dxz < rhs ? [true, `d(x, z) = ${fmt(dxz, 2)} ≤ ${fmt(dxy, 2)} + ${fmt(dyz, 2)} = ${fmt(rhs, 2)}`] : [false, `d(x, z) = ${fmt(dxz, 2)} > ${fmt(dxy, 2)} + ${fmt(dyz, 2)} = ${fmt(rhs, 2)}`];
+        }
+        const side = undef ? css("--muted") : !tri[0] ? css("--coral") : equal ? css("--focus") : css("--mint-2");
+        const shapes = [{ pts: [X0, y], color: css("--sand-2") }, { pts: [y, Z0], color: css("--sand-2") }, { pts: [X0, Z0], color: side, width: 3 }];
+        if (m === "cos") [X0, y, Z0].forEach((p) => shapes.push({ pts: [[0, 0], [p[0] * 1.6, p[1] * 1.6]], color: css("--line"), dash: [3, 3] }));
+        const { X, Y } = plane(cv, [{ x: X0[0], y: X0[1], color: css("--coral"), label: "x" }, { x: Z0[0], y: Z0[1], color: css("--mint-2"), label: "z" }, { x: y[0], y: y[1], color: css("--lagoon"), label: "y" }], { shapes });
+        if (!undef) {
+          const ctx = cv.getContext("2d"); ctx.font = "bold 12px Public Sans"; ctx.fillStyle = css("--ink-2");
+          [[X0, y, dxy], [y, Z0, dyz], [X0, Z0, dxz]].forEach(([a, b, v]) => ctx.fillText(fmt(v, 2), (X(a[0]) + X(b[0])) / 2 + 6, (Y(a[1]) + Y(b[1])) / 2 + 14));
+        }
+        const row = (name, c) => [h("b", {}, name), h("span", { style: c ? `color:${c[0] ? "var(--mint-2)" : "var(--coral)"}` : "" }, c ? (c[0] ? "✓ " : "✗ ") + c[1] : "undefined")];
+        showIn(checks, h("div", { class: "kv" }, ...row("Positivity", pos), ...row("Symmetry", sym), ...row("Triangle", tri)));
+        showIn(msg,
+          undef ? callout("y = (0, 0) is the zero vector. It has no direction, so cos = x·y / (‖x‖ ‖y‖) divides by 0: undefined. No distance can be computed; a system must reject such input instead of inventing a value.", "edge") : null,
+          !undef && equal && dxy > 0 && dyz > 0 ? callout("Boundary case: y lies on the shortest path from x to z, so the detour through y is exactly as long as the direct route. The triangle inequality says ≤, so it still holds, with equality.", "edge") : null,
+          !undef && !pos[0] ? callout("Positivity fails: two different points are at distance 0. Seen from the origin, x and y point in the same direction, and 1 − cosine only looks at directions.", "edge") : null,
+          h("p", { class: "note" }, "These checks test only this one triangle. Passing here does not prove a metric; one failure is enough to disprove it."));
+      }
+      const mCtl = select({ label: "Distance", options: Object.entries(D).map(([value, o]) => ({ value, label: o.label })), value: m, onchange: (v) => { m = v; redraw(); pulse(checks); } });
+      const yxCtl = range({ label: "y: first coordinate", min: 0, max: 10, step: 0.5, value: y[0], onchange: (v) => { y = [v, y[1]]; redraw(); } });
+      const yyCtl = range({ label: "y: second coordinate", min: 0, max: 10, step: 0.5, value: y[1], onchange: (v) => { y = [y[0], v]; redraw(); } });
+      const moveY = (a, b, ms = 1000) => Promise.all([yxCtl.animateTo(a, ms), yyCtl.animateTo(b, ms)]);
+      const ex = examples([
+        { label: "Euclidean passes all three", note: "y wanders around the plane. With Euclidean distance every check stays green: the direct side x–z is never longer than the detour through y.", run: async () => { mCtl.apply("euclid"); await moveY(8, 2); await moveY(1, 9); await moveY(5, 8); } },
+        { label: "Squared Euclidean breaks the triangle", note: "y moves to the midpoint (5, 5). Euclidean: 7.21 = 3.61 + 3.61, exactly on the boundary. Then the distance switches to squared Euclidean: 52 > 13 + 13. Squaring punishes long sides, so it is not a metric.", run: async () => { mCtl.apply("euclid"); await moveY(5, 5); await sleep(1500); mCtl.apply("sq"); await sleep(600); } },
+        { label: "Uphill road: not symmetric", note: "Each unit climbed costs one extra unit of distance. With y up the hill at (5, 9), going x → y costs more than y → x. Symmetry fails; the triangle inequality still holds.", run: async () => { mCtl.apply("uphill"); await moveY(5, 9); await sleep(600); } },
+        { label: "y on the line from x to z", kind: "edge", note: "y stops exactly on the segment, at (5, 5) and then (6.5, 6). The x–z side turns yellow: the triangle inequality holds with equality.", run: async () => { mCtl.apply("euclid"); await moveY(5, 5); await sleep(1400); await moveY(6.5, 6); await sleep(600); } },
+        { label: "1 − cosine: different points at distance 0", kind: "edge", note: "y moves to (4, 6), twice x = (2, 3). The dashed rays from the origin overlap: same direction, so 1 − cosine = 0 although x ≠ y.", run: async () => { mCtl.apply("cos"); await moveY(4, 6); await sleep(600); } },
+        { label: "Zero vector under cosine", kind: "edge", note: "y slides to the origin (0, 0). The zero vector has no direction, and the page shows undefined instead of a number.", run: async () => { mCtl.apply("cos"); await moveY(0, 0, 1400); await sleep(600); } },
+      ]);
+      redraw();
+      return h("div", {}, ex,
+        h("div", { class: "lab" }, h("div", { class: "controls" }, mCtl, yxCtl, yyCtl, h("p", { class: "note" }, "x = (2, 3) and z = (8, 7) are fixed. Move y.")), h("div", { class: "stage" }, h("div", { style: "display:grid;grid-template-columns:minmax(0,420px) 1fr;gap:1rem;align-items:start" }, cv, h("div", {}, checks, msg)))),
+        h("h3", {}, "Quiz: metric or not?"), quiz([
+      { q: "d(A, B) = |A − B| (elements in A but not B)", options: ["Metric", "Not a metric: asymmetric", "Not a metric: fails triangle inequality"], answer: ["Not a metric: asymmetric", "Not a metric: fails triangle inequality"], why: "A = {1,2,3,4}, B = {2,3,4}: d(A,B) = 1 but d(B,A) = 0. Using |A − B| + |B − A| fixes it." },
+      { q: "Clock distance d(t1, t2) = t2 − t1 if t1 ≤ t2 else 24 + t2 − t1", options: ["Metric", "Not a metric: asymmetric"], answer: "Not a metric: asymmetric", why: "d(1PM, 2PM) = 1, d(2PM, 1PM) = 23." },
+      { q: "Manhattan distance on the plane", options: ["Metric", "Not a metric"], answer: "Metric", why: "All Minkowski distances with r ≥ 1 are metrics." },
+      { q: "Cosine similarity", options: ["Metric", "Similarity, not a distance"], answer: "Similarity, not a distance", why: "It is 1 for identical directions; 1 − cos is a dissimilarity, and arccos(cos) is a metric (the angle)." },
+      { q: "Hamming distance between two binary alarm vectors", options: ["Metric", "Not a metric"], answer: "Metric", why: "It is L1 on 0/1 vectors." },
+      { q: "If d(x,y) = 2 and d(y,z) = 3 and d is a metric, d(x,z) can be", options: ["at most 5", "exactly 5", "anything"], answer: "at most 5", why: "Triangle inequality." },
+      ]));
+    },
+  });
+
+  steps.push({
+    id: "scaling", title: "Sensors with different ranges: standardize first", time: 15,
+    theory: `<h3>The attribute with the biggest numbers wins</h3>
+      <p>Flow runs from about 100 to 650 m³/h; vibration from 1 to 12 mm/s; pressure from 25 to 60 bar. In a raw Euclidean distance, flow differences dwarf everything else: the "most similar past trip" is simply the one that happened at the same flow rate, which says little about the fault. Standardizing each attribute to z-scores (subtract the mean, divide by the standard deviation) puts them on the same footing. The robust alternative replaces the mean with the median and the standard deviation with the absolute deviation.</p>
+      <p>Pick a trip and compare its nearest past trip before and after standardization, and check whether that trip had the same root cause. The last line scores the whole history: for every trip, does its nearest other trip have the same root cause? Then change the weights: weighting is how you say which sensors matter for diagnosis.</p>`,
+    ask: `<div class='a'>Pick a bearing-wear or cavitation trip. Raw: the nearest trip simply matches the flow, and its root cause is often wrong. Standardized: vibration and temperature count too. On this history the nearest trip has the right root cause for 32% of trips raw and 52% standardized (with 5 causes, guessing gives 20%). Then ask: "Which sensors should matter for diagnosis?"</div>
+      <div class='a'>"Weights for diagnosis" tests the obvious answer first: flow down to 0.3, vibration and bearing temperature up to 2 drops the share to 42%, because flow is what separates motor faults (they run at low flow). Vibration, bearing temperature and flow at 1.5 with pressure at 0.5 lifts it to 58%. Weights are a modeling decision to check against data, not intuition. The edge cases: all weights 0 (every trip ties, no diagnosis) and a genuine tie for nearest when only vibration counts.</div>`,
+    mount() {
+      let who = 0, std = false, metricName = "euclid"; const w = Object.fromEntries(NUM.map((k) => [k, 1]));
+      const RAW = NUM.map((k) => HIST.map((c) => c[k])), Z = zscore(RAW), DIST = { euclid, manhattan, supremum };
+      const feats = (s, wt) => HIST.map((_, i) => NUM.map((k, j) => (s ? Z : RAW)[j][i] * wt[k]));
+      const ranking = (F, d, i) => HIST.map((c, j) => ({ j, d: j === i ? Infinity : d(F[i], F[j]) })).sort((a, b) => a.d - b.d || a.j - b.j).slice(0, HIST.length - 1);
+      const ties = (rk) => rk.filter((x) => near(x.d, rk[0].d));
+      const allZero = (wt) => NUM.every((k) => wt[k] === 0);
+      const accuracy = (s, wt, name) => { if (allZero(wt)) return null; const F = feats(s, wt); return mean(HIST.map((c, i) => (HIST[ranking(F, DIST[name], i)[0].j].cause === c.cause ? 1 : 0))); };
+      const out = h("div"), msg = h("div"), cv = canvas(760, 300), scoreV = h("div", { class: "v" }, "–"), scoreEl = h("div", { class: "metric big" }, h("div", { class: "k" }, "Nearest trip has the same root cause (all 60 trips)"), scoreV);
+      const lines = new Map(); let top = [];
+      const pad = { l: 44, r: 12, t: 16, b: 28 }, xhi = Math.max(...RAW[3]) + 20, yhi = Math.max(...RAW[0]) + 1;
+      const X = (x) => pad.l + (x / xhi) * (cv.width - pad.l - pad.r), Y = (y) => pad.t + (1 - y / yhi) * (cv.height - pad.t - pad.b);
+      function draw() {
+        const ctx = cv.getContext("2d"), me = HIST[who]; ctx.clearRect(0, 0, cv.width, cv.height);
+        ctx.font = "12px Public Sans"; ctx.fillStyle = css("--muted"); ctx.fillText("flow (m³/h)", cv.width / 2 - 30, cv.height - 6); ctx.fillText("vibration (mm/s)", 8, 12);
+        HIST.forEach((c) => { ctx.fillStyle = CAUSES[c.cause].color; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.arc(X(c.flow_m3h), Y(c.vibration_mm_s), 4, 0, 7); ctx.fill(); });
+        const x0 = X(me.flow_m3h), y0 = Y(me.vibration_mm_s);
+        for (const [j, s] of lines) { const c = HIST[j], x1 = X(c.flow_m3h), y1 = Y(c.vibration_mm_s); ctx.globalAlpha = Math.max(0.1, s.p); ctx.strokeStyle = j === top[0] ? css("--ink") : css("--muted"); ctx.lineWidth = j === top[0] ? 2.5 : 1.2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + (x1 - x0) * s.p, y0 + (y1 - y0) * s.p); ctx.stroke(); }
+        ctx.globalAlpha = 1;
+        top.forEach((j, r) => { const c = HIST[j], s = lines.get(j); if (!s || s.p < 0.9) return; ctx.fillStyle = CAUSES[c.cause].color; ctx.beginPath(); ctx.arc(X(c.flow_m3h), Y(c.vibration_mm_s), r ? 6 : 8, 0, 7); ctx.fill(); ctx.fillStyle = css("--ink"); ctx.font = "bold 12px Public Sans"; ctx.fillText(r ? String(r + 1) : "1 nearest", X(c.flow_m3h) + 9, Y(c.vibration_mm_s) + 4); });
+        ctx.fillStyle = CAUSES[me.cause].color; ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x0, y0, 9, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = css("--ink"); ctx.font = "bold 12px Public Sans"; ctx.textAlign = "center"; ctx.fillText("new trip", x0, y0 + 24); ctx.textAlign = "left";
+      }
+      const kick = frames((dt) => { let busy = false; for (const [j, s] of lines) { const goal = top.includes(j) ? 1 : 0; if (s.p !== goal) { s.p = goal ? Math.min(1, s.p + dt / 450) : Math.max(0, s.p - dt / 250); busy = true; } else if (!goal) lines.delete(j); } draw(); return busy; });
+      let shown = null, tok = 0;
+      function redraw(newWho = false) {
+        if (newWho) lines.clear();
+        const zeroW = allZero(w), rk = ranking(feats(std, w), DIST[metricName], who), me = HIST[who], tied = zeroW ? [] : ties(rk);
+        top = zeroW ? [] : rk.slice(0, 5).map((x) => x.j);
+        top.forEach((j) => lines.has(j) || lines.set(j, { p: 0 }));
+        const t = h("table", {}, h("tr", {}, h("th", {}, "Rank"), h("th", {}, "Trip"), h("th", {}, "distance"), ...NUM.map((k) => h("th", {}, NUM_LABEL[k])), h("th", {}, "root cause")));
+        t.append(h("tr", { style: "background:var(--sand)" }, h("td", {}, "new"), h("td", {}, tripName(me)), h("td", {}, "0"), ...NUM.map((k) => h("td", {}, me[k])), h("td", {}, CAUSES[me.cause].label)));
+        rk.slice(0, 5).forEach((x, i) => { const c = HIST[x.j]; t.append(h("tr", {}, h("td", {}, tied.length > 1 && tied.includes(x) ? "1 (tie)" : i + 1), h("td", {}, tripName(c)), h("td", {}, fmt(x.d, 2)), ...NUM.map((k) => h("td", {}, c[k])), h("td", { style: c.cause === me.cause ? "color:var(--mint-2);font-weight:600" : "color:var(--coral)" }, CAUSES[c.cause].label + (c.cause === me.cause ? " ✓" : " ✗")))); });
+        showIn(out, h("div", { class: "wide" }, t));
+        const acc = accuracy(std, w, metricName), my = ++tok, from = shown ?? acc;
+        if (acc === null) { shown = null; scoreV.textContent = "no nearest trip"; scoreEl.className = "metric big bad"; }
+        else { scoreEl.className = "metric big " + (acc > 0.7 ? "good" : acc < 0.4 ? "bad" : ""); tween(450, (u) => { if (my !== tok) return; shown = from + (acc - from) * u; scoreV.textContent = fmt(100 * shown, 0) + "%"; }); }
+        const causes = [...new Set(tied.map((x) => CAUSES[HIST[x.j].cause].label))];
+        showIn(msg,
+          zeroW ? callout("All weights are 0. Every distance is 0, so all 59 past trips tie for nearest. There is no nearest trip and no diagnosis: at least one sensor must count.", "edge") : null,
+          tied.length > 1 ? callout(`Tie for nearest: ${tied.map((x) => tripName(HIST[x.j])).join(", ")} are ${tied.length === 2 ? "both" : "all"} at distance ${fmt(rk[0].d, 2)}. Their root causes: ${causes.join(", ")}. ${causes.length > 1 ? "They disagree, so the diagnosis depends on how the tie is broken. This page takes the first trip in the list; a vote among the tied trips or a second attribute is a better rule." : "They agree, so here the tie does no harm."}`, "edge") : null);
+        kick();
+      }
+      const whoCtl = select({ label: "New trip", options: HIST.map((c) => ({ value: c.id, label: `${tripName(c)}: ${CAUSES[c.cause].label}` })), value: who, onchange: (v) => { who = +v; redraw(true); } });
+      const stdCtl = check({ label: "Standardize (z-scores)", value: std, onchange: (v) => { std = v; redraw(); } });
+      const mCtl = select({ label: "Distance", options: [{ value: "euclid", label: "Euclidean" }, { value: "manhattan", label: "Manhattan" }, { value: "supremum", label: "Supremum" }], value: metricName, onchange: (v) => { metricName = v; redraw(); } });
+      const wCtl = Object.fromEntries(NUM.map((k) => [k, range({ label: "weight " + NUM_LABEL[k], min: 0, max: 3, step: 0.1, value: 1, fmt: (v) => v.toFixed(1), onchange: (v) => { w[k] = v; redraw(); } })]));
+      const setW = (vals, ms = 900) => Promise.all(NUM.map((k, j) => wCtl[k].animateTo(vals[j], ms)));
+      /* measured on this history when the step opens, so the notes always match the page */
+      const wOf = (vals) => Object.fromEntries(NUM.map((k, j) => [k, vals[j]]));
+      const ONES = wOf([1, 1, 1, 1]), WD = [2, 2, 1, 0.3], WG = [1.5, 1.5, 0.5, 1.5], VIB = wOf([1, 0, 0, 0]);
+      const accRaw = accuracy(false, ONES, "euclid"), accStd = accuracy(true, ONES, "euclid"), accW = accuracy(true, wOf(WD), "euclid"), accG = accuracy(true, wOf(WG), "euclid");
+      const nearestCause = (s, wt, name, i) => HIST[ranking(feats(s, wt), DIST[name], i)[0].j].cause;
+      const demo = (HIST.find((c, i) => (c.cause === "bearing" || c.cause === "cavitation") && nearestCause(false, ONES, "euclid", i) !== c.cause && nearestCause(true, ONES, "euclid", i) === c.cause) || HIST[0]).id;
+      const tieWho = (HIST.find((c, i) => { const tt = ties(ranking(feats(false, VIB), manhattan, i)); return tt.length > 1 && new Set(tt.map((x) => HIST[x.j].cause)).size > 1; }) || HIST[0]).id;
+      const ex = examples([
+        { label: "Raw vs standardized", note: `${tripName(HIST[demo])} (${CAUSES[HIST[demo].cause].label}) is the new trip. Raw, flow dominates the distance and the nearest trip has the wrong root cause. Then standardization switches on: watch the lines swing to other neighbors. Over all 60 trips the share of right diagnoses goes from ${fmt(100 * accRaw, 0)}% raw to ${fmt(100 * accStd, 0)}% standardized.`, run: async () => { mCtl.apply("euclid"); stdCtl.apply(false); await setW([1, 1, 1, 1], 500); whoCtl.apply(demo); await sleep(2000); stdCtl.apply(true); await sleep(2000); } },
+        { label: "Weights for diagnosis", note: `Standardized. First the obvious idea: flow glides down to 0.3, vibration and bearing temperature up to 2. The score goes from ${fmt(100 * accStd, 0)}% to ${fmt(100 * accW, 0)}%: flow mattered, because motor faults run at low flow. Then vibration, bearing temperature and flow glide to 1.5 and pressure to 0.5: ${fmt(100 * accG, 0)}%. Check weights against the data.`, run: async () => { mCtl.apply("euclid"); stdCtl.apply(true); await setW([1, 1, 1, 1], 500); await sleep(500); await setW(WD, 2000); await sleep(1500); await setW(WG, 2000); } },
+        { label: "All weights zero", kind: "edge", note: "Every weight glides to 0. Every distance becomes 0 and all past trips tie, so there is no nearest trip. The page says so instead of picking one at random.", run: async () => { await setW([0, 0, 0, 0], 2000); await sleep(800); } },
+        { label: "Tie for nearest trip", kind: "edge", note: `Only vibration counts (raw, Manhattan). Vibration is recorded to 0.1 mm/s, so several past trips sit at exactly the same distance from ${tripName(HIST[tieWho])}, and their root causes disagree. The table marks the tie.`, run: async () => { stdCtl.apply(false); mCtl.apply("manhattan"); whoCtl.apply(tieWho); await setW([1, 0, 0, 0], 1600); await sleep(800); } },
+      ]);
+      redraw(true);
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, whoCtl, stdCtl, mCtl, ...NUM.map((k) => wCtl[k])), h("div", { class: "stage" }, cv, causeLegend(), h("div", { class: "metrics" }, scoreEl), msg, out)));
+    },
+  });
+
+  steps.push({
+    id: "binary", title: "Alarm codes: simple matching vs Jaccard", time: 15,
+    theory: `<h3>Do shared zeros count?</h3>
+      <p>For two binary vectors count f<sub>00</sub>, f<sub>01</sub>, f<sub>10</sub>, f<sub>11</sub> (first index from x, second from y).</p>
+      <ul><li><b>Simple matching coefficient</b> SMC = (f<sub>00</sub> + f<sub>11</sub>) / (f<sub>00</sub> + f<sub>01</sub> + f<sub>10</sub> + f<sub>11</sub>): shared zeros count as agreement. Right for symmetric attributes, such as the yes/no answers of an inspection checklist.</li>
+      <li><b>Jaccard</b> J = f<sub>11</sub> / (f<sub>11</sub> + f<sub>01</sub> + f<sub>10</sub>): shared zeros ignored. Right for <b>asymmetric</b> attributes such as alarm codes: two trips that both did not raise "Seal leak" have nothing in common because of it. A real control system has hundreds of alarm tags, and almost all of them are silent at any trip.</li></ul>
+      <p>The lecture's example: x = (1,0,0,0,0,0,0,0,0,0), y = (0,0,0,0,0,0,1,0,0,1) gives SMC = 0.7 but J = 0. Add alarm tags that never fired and watch SMC climb toward 1 for every pair while Jaccard stays put.</p>`,
+    ask: `<div class='a'>Ask which pair of trips is "most similar" under each measure and why they disagree. Then add 200 silent alarm tags: SMC says the six trips are on average about 98% similar (0.70 before). That is the shared-zero problem, and why Jaccard is the usual choice for sparse event data such as alarms, purchases or clicks.</div>
+      <div class='a'>Run "Count Trip 1 vs Trip 2" to show the four counts filling in cell by cell, then the lecture example (SMC 0.7, J 0). The edge case is two real trips with no alarm at all: Jaccard is 0/0, undefined. Ask what a diagnosis system should do then (fall back on sensors and notes). Students can click cells in the pair table to switch alarms on and off.</div>`,
+    mount() {
+      let extra = 0, ia = 0, ib = 1; const six = HIST.slice(0, 6), names = six.map((c) => `Trip ${c.id + 1}`);
+      const jac = (a, b) => { const f = binCounts(a, b), u = f.f11 + f.f10 + f.f01; return u ? f.f11 / u : null; };
+      const pad0 = (v, n = extra) => v.concat(new Array(n).fill(0));
+      const avgSMC = (n) => { const v = six.map((c) => pad0(c.codes, n)); let s = 0, k = 0; for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) { s += smc(v[i], v[j]); k++; } return s / k; };
+      const pairBox = h("div"), pairStats = h("div", { class: "metrics" }), pairMsg = h("div"), out = h("div");
+      let pair = null, shownK = Infinity, scanK = -1;
+      function setPair(na, a, nb, b, labels = CODE_SHORT, titles = CODES) { pair = { na, a: a.slice(), nb, b: b.slice(), labels, titles }; shownK = Infinity; scanK = -1; drawPair(); }
+      function drawPair() {
+        const n = pair.a.length, total = n + extra, upto = Math.min(shownK, total), f = { f00: 0, f01: 0, f10: 0, f11: 0 };
+        for (let k = 0; k < upto; k++) { const x = k < n ? pair.a[k] : 0, y = k < n ? pair.b[k] : 0; if (x && y) f.f11++; else if (x) f.f10++; else if (y) f.f01++; else f.f00++; }
+        const cell = (k) => (k >= upto ? "opacity:.25;text-align:center;cursor:pointer" : `background:${pair.a[k] && pair.b[k] ? "var(--mint)" : pair.a[k] || pair.b[k] ? "var(--sand)" : "transparent"};text-align:center;cursor:pointer` + (k === scanK ? ";outline:2px solid var(--lagoon)" : ""));
+        const row = (name, which) => h("tr", {}, h("th", {}, name), ...pair[which].map((x, k) => h("td", { style: cell(k), title: "click to switch this alarm on or off", onclick: () => { pair[which][k] = pair[which][k] ? 0 : 1; shownK = Infinity; scanK = -1; drawPair(); } }, x)), extra ? h("td", { class: "note", style: upto > n ? "" : "opacity:.25" }, `${Math.max(0, upto - n)} × 0`) : null);
+        showIn(pairBox, h("div", { class: "wide" }, h("table", {}, h("tr", {}, h("th", {}, ""), ...pair.labels.map((l, k) => h("th", { style: "font-size:.75rem", title: pair.titles[k] || "" }, l)), extra ? h("th", { style: "font-size:.75rem" }, `${extra} silent tags`) : null), row(pair.na, "a"), row(pair.nb, "b"))));
+        const u = f.f11 + f.f10 + f.f01;
+        showIn(pairStats, metric("f11 (both)", f.f11), metric(`f10 (only ${pair.na})`, f.f10), metric(`f01 (only ${pair.nb})`, f.f01), metric("f00 (neither)", f.f00), metric("SMC", upto ? `${f.f00 + f.f11}/${upto} = ${fmt((f.f00 + f.f11) / upto, 3)}` : "–"), metric("Jaccard", u ? `${f.f11}/${u} = ${fmt(f.f11 / u, 3)}` : upto >= total ? "0/0: undefined" : "–", u || upto < total ? "" : "bad"));
+        showIn(pairMsg, upto >= total && !u ? callout(`Neither ${pair.na} nor ${pair.nb} raised an alarm. f11 + f10 + f01 = 0, so Jaccard = 0/0 is undefined. SMC = ${fmt(f.f00 / total, 2)} calls them identical only because of shared zeros. The honest answer is "no alarm evidence": diagnose from the sensors and the notes instead. (The tournament code scores 0/0 as 1.)`, "edge") : null);
+      }
+      async function scan(ms = 230) {
+        const n = pair.a.length; shownK = 0; scanK = -1; drawPair(); await sleep(300);
+        for (let k = 0; k < n; k++) { scanK = k; shownK = k + 1; drawPair(); await sleep(ms); }
+        scanK = -1; if (extra) await tween(900, (t) => { shownK = n + Math.round(extra * t); drawPair(); });
+        shownK = Infinity; drawPair();
+      }
+      function redraw() {
+        const vecs = six.map((c) => pad0(c.codes));
+        const S = vecs.map((a) => vecs.map((b) => smc(a, b))), J = vecs.map((a) => vecs.map((b) => jac(a, b)));
+        const best = (M) => { let bi = -1, bj = -1, bv = -1; for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) if (i !== j && M[i][j] !== null && M[i][j] > bv) { bv = M[i][j]; bi = i; bj = j; } return [bi, bj]; };
+        const bs = best(S), bj = best(J);
+        out.innerHTML = "";
+        out.append(h("div", { class: "wide" }, h("table", {}, h("tr", {}, h("th", {}, "Trip"), ...CODE_SHORT.map((c, k) => h("th", { style: "font-size:.75rem", title: CODES[k] }, c)), h("th", {}, "root cause")), ...six.map((c, i) => h("tr", {}, h("td", {}, names[i]), ...c.codes.map((v) => h("td", { style: v ? "background:var(--mint)" : "" }, v)), h("td", { class: "note" }, CAUSES[c.cause].label))))));
+        out.append(h("p", { class: "note" }, CODE_SHORT.map((c, k) => `${c} = ${CODES[k]}`).join(" · ")));
+        out.append(h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:1rem" }, h("div", {}, h("h3", {}, `SMC (${12 + extra} alarm tags)`), matrixTable(names, S, (v) => fmt(v, 2), (i, j) => i === bs[0] && j === bs[1])), h("div", {}, h("h3", {}, "Jaccard"), matrixTable(names, J, (v) => (v === null ? "0/0" : fmt(v, 2)), (i, j) => i === bj[0] && j === bj[1]))));
+        out.append(h("p", { class: "note" }, `Most similar pair by SMC: ${names[bs[0]]} and ${names[bs[1]]}. By Jaccard: ${bj[0] < 0 ? "none (no pair shares an alarm)" : `${names[bj[0]]} and ${names[bj[1]]}`}. Average SMC over the 15 pairs: ${fmt(avgSMC(extra), 3)}.`));
+      }
+      const pick = () => setPair(`Trip ${ia + 1}`, HIST[ia].codes, `Trip ${ib + 1}`, HIST[ib].codes);
+      const opts = HIST.map((c) => ({ value: c.id, label: `Trip ${c.id + 1} (${c.codes.filter(Boolean).length} alarms)` }));
+      const aCtl = select({ label: "Pair view: first trip", options: opts, value: ia, onchange: (v) => { ia = +v; pick(); } });
+      const bCtl = select({ label: "Pair view: second trip", options: opts, value: ib, onchange: (v) => { ib = +v; pick(); } });
+      const extraCtl = range({ label: "Extra alarm tags that never fired", min: 0, max: 200, step: 10, value: 0, onchange: (v) => { extra = v; redraw(); drawPair(); } });
+      const silent = HIST.filter((c) => !c.codes.some(Boolean)).map((c) => c.id);
+      const pickPair = (a, b) => { aCtl.set(a); bCtl.set(b); ia = a; ib = b; pick(); pulse(aCtl); pulse(bCtl); };
+      const ex = examples([
+        { label: "Count Trip 1 vs Trip 2", note: "The scan walks along the 12 alarm codes. Each column lands in one of the four counts: both (green), only one (yellow) or neither. SMC and Jaccard update as the counts grow.", run: async () => { await extraCtl.animateTo(0, 500); pickPair(0, 1); await scan(); } },
+        { label: "Lecture example", note: "x = (1,0,0,0,0,0,0,0,0,0), y = (0,0,0,0,0,0,1,0,0,1). Seven shared zeros make SMC = 0.7, but the two vectors share no 1: Jaccard = 0.", run: async () => { await extraCtl.animateTo(0, 500); setPair("x", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0], "y", [0, 0, 0, 0, 0, 0, 1, 0, 0, 1], ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], []); await scan(); } },
+        { label: "Add 200 silent tags", note: `200 alarm tags that never fired are added. Every SMC cell creeps toward 1: the average SMC over the 15 pairs goes from ${fmt(avgSMC(0), 3)} to ${fmt(avgSMC(200), 3)}. The Jaccard matrix does not change at all.`, run: async () => { pickPair(0, 1); await extraCtl.animateTo(0, 400); await extraCtl.animateTo(200, 3200); } },
+        { label: "Two trips with no alarms", kind: "edge", note: silent.length > 1 ? `Trip ${silent[0] + 1} and Trip ${silent[1] + 1} raised none of the 12 codes. Watch the counts: only f00 grows. Jaccard ends at 0/0, which is undefined.` : "Two trips with no alarm codes: Jaccard ends at 0/0, which is undefined.", run: async () => { await extraCtl.animateTo(0, 400); if (silent.length > 1) pickPair(silent[0], silent[1]); else setPair("Trip X", new Array(12).fill(0), "Trip Y", new Array(12).fill(0)); await scan(); } },
+      ]);
+      redraw(); pick();
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, aCtl, bCtl, extraCtl, h("p", { class: "note" }, "Click a cell in the pair table to switch that alarm on or off.")), h("div", { class: "stage" }, h("h3", { style: "margin-top:0" }, "Pair view"), pairBox, pairStats, pairMsg, h("h3", {}, "All pairs of the first six trips"), out)));
+    },
+  });
+
+  steps.push({
+    id: "cosine", title: "Technician notes: cosine similarity", time: 20,
+    theory: `<h3>Compare directions, not lengths</h3>
+      <p>A note becomes a vector of word counts (bag of words). Two notes about the same fault point in the same direction even if one is three times longer, so we compare the <b>angle</b>: cos(x, y) = x·y / (‖x‖ ‖y‖), 1 for identical direction, 0 for no shared words. The lecture's example: x = (3,2,0,5,0,0,0,2,0,0), y = (1,0,0,0,0,0,0,1,0,2) gives 5 / 14.51 = 0.31. The <b>extended Jaccard</b> (Tanimoto) x·y / (‖x‖² + ‖y‖² − x·y) is the alternative for counts.</p>
+      <p>Type the technician's note for a new trip (or use the sample) and rank the failure modes of the pump's <b>FMEA</b> sheet (failure mode and effects analysis). Removing stop words ("the", "and") usually sharpens the ranking: common words add to every dot product without saying anything.</p>`,
+    ask: `<div class='a'>Show the vocabulary size and ask why it matters (sparse vectors, curse of dimensionality). Ask why Euclidean distance would favor short notes. Then let a student type a note for a fault they invent and see whether the right failure mode comes first. Point out words like "pump" that appear everywhere: they are domain stop words, which TF-IDF (Going deeper) down-weights automatically.</div>
+      <div class='a'>Examples: the sample note typed word by word (watch the rows re-sort), stop words off and on, and the same note three times longer (cosine does not move, Euclidean does). Edge cases: an empty note and a note made only of stop words are zero vectors, so cosine is 0/0; a note sharing no word with the FMEA sheet gives a six-way tie at 0.</div>`,
+    mount() {
+      const FMEA = [
+        ["Bearing wear", "Drive end or non drive end bearing worn: grinding or rumbling noise, high bearing temperature, dark or discolored grease, vibration rising with speed. Check the lubrication and replace the bearing."],
+        ["Cavitation", "Suction pressure too low: crackling noise like gravel in the casing, fluctuating suction pressure gauge, unstable surging flow, pitting on the impeller. Check the suction strainer and the tank level."],
+        ["Mechanical seal failure", "Seal faces worn or flush blocked: liquid dripping from the seal gland, puddle under the pump, seal pot level dropping, product smell. Replace the seal and clear the flush line."],
+        ["Shaft misalignment", "Pump and motor shafts not aligned: hot coupling guard, high axial vibration, worn coupling elements, loose baseplate bolts, often after motor work. Realign with a laser tool and check for soft foot."],
+        ["Motor electrical fault", "Motor or supply problem: overcurrent trip, breaker trips on start, burned smell from the terminal box, low insulation resistance on a winding, voltage dips on the feeder. Megger test and inspect the motor."],
+        ["Impeller blockage", "Debris in the impeller: low flow and low discharge pressure at normal speed, motor current lower than usual, rattling noise. Open the casing and clean the impeller."],
+      ];
+      const SAMPLE = "Night shift operator heard a crackling noise like gravel in the pump casing. The suction pressure gauge was fluctuating and the flow was surging. The pump was stopped and the spare was started.";
+      let stop = true, measure = "cosine";
+      const ROW = 62, MNAME = { cosine: "cosine", ej: "extended Jaccard", euclid: "1/(1 + Euclidean)" };
+      const ta = h("textarea", { rows: 7 }, SAMPLE), stats = h("div", { class: "metrics" }), msg = h("div"), head = h("p", { class: "note" });
+      const board = h("div", { style: `position:relative;height:${FMEA.length * ROW}px` });
+      const rows = FMEA.map(([name]) => {
+        const bar = h("div", { style: "height:8px;border-radius:4px;background:var(--lagoon);width:0;transition:width .45s" }), val = h("span", { style: "font-weight:700;font-variant-numeric:tabular-nums" }), rk = h("span", { class: "note" });
+        const words = h("div", { class: "note", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis" });
+        const el = h("div", { style: `position:absolute;left:0;right:0;top:0;height:${ROW - 6}px;transition:top .45s,background .3s;padding:2px 8px;border-radius:8px` }, h("div", { style: "display:flex;gap:.6rem;align-items:baseline" }, rk, h("b", {}, name), h("span", { style: "flex:1" }), val), h("div", { style: "background:var(--line);border-radius:4px" }, bar), words);
+        board.append(el); return { el, bar, val, rk, words };
+      });
+      function redraw() {
+        const docs = [ta.value].concat(FMEA.map((j) => j[1])), { vocab, vecs } = bow(docs, stop), q = vecs[0], empty = !q.some(Boolean);
+        const sims = FMEA.map((j, i) => { const v = vecs[i + 1]; return { i, s: measure === "euclid" ? 1 / (1 + euclid(q, v)) : measure === "ej" ? extJaccard(q, v) : empty ? null : cosine(q, v), shared: vocab.filter((w, k) => q[k] && v[k]) }; });
+        const order = sims.slice().sort((a, b) => (b.s ?? -1) - (a.s ?? -1) || a.i - b.i);
+        const tiedTop = order[0].s === null ? [] : order.filter((x) => x.s !== null && near(x.s, order[0].s));
+        order.forEach((x, r) => { const R = rows[x.i]; R.el.style.top = r * ROW + "px"; R.bar.style.width = (x.s === null ? 0 : clamp(100 * x.s, 0, 100)) + "%"; R.val.textContent = x.s === null ? "undefined" : fmt(x.s, 3); R.rk.textContent = "#" + (r + 1); R.words.textContent = x.shared.length ? "shared: " + x.shared.join(", ") : "no shared words"; R.el.style.background = r === 0 && tiedTop.length === 1 && x.s > 0 ? "var(--sand)" : "transparent"; });
+        head.textContent = `Failure modes ranked by ${MNAME[measure]} with the note:`;
+        showIn(stats, metric("Vocabulary size", vocab.length), metric("Non-zero entries in the note's vector", q.filter(Boolean).length));
+        const zeroText = (ta.value.trim() ? "Every word of the note is a stop word, so after removing them its vector is all zeros." : "The note is empty: its vector is all zeros.") + (measure === "cosine" ? " Then ‖x‖ = 0 and cosine = x·y / (‖x‖ ‖y‖) is 0/0: undefined. No diagnosis from text." : measure === "ej" ? " Extended Jaccard gives 0 for every failure mode: a six-way tie, no diagnosis." : " Euclidean still returns numbers, but they only reflect how long each FMEA entry is: the shortest entry wins. That ranking means nothing.");
+        showIn(msg,
+          empty ? callout(zeroText, "edge") : null,
+          !empty && measure !== "euclid" && order[0].s === 0 ? callout("No word of the note appears in any FMEA entry. All six scores are 0: a six-way tie, so the text gives no diagnosis.", "edge") : null,
+          !empty && order[0].s > 0 && tiedTop.length > 1 ? callout(`Tie for first place: ${tiedTop.map((x) => FMEA[x.i][0]).join(" and ")} both score ${fmt(order[0].s, 3)}.`, "edge") : null);
+      }
+      async function typeText(text, ms = 70, append = false) { if (!append) ta.value = ""; for (const part of text.split(/(\s+)/)) { ta.value += part; if (part.trim()) { redraw(); await sleep(ms); } } redraw(); }
+      async function erase(ms = 45) { while (ta.value) { const before = ta.value; ta.value = ta.value.replace(/\S*\s*$/, ""); if (ta.value === before) ta.value = ""; redraw(); await sleep(ms); } }
+      const stopCtl = check({ label: "Remove stop words", value: stop, onchange: (v) => { stop = v; redraw(); } });
+      const measCtl = select({ label: "Measure", options: [{ value: "cosine", label: "cosine" }, { value: "ej", label: "extended Jaccard" }, { value: "euclid", label: "Euclidean (as similarity)" }], value: measure, onchange: (v) => { measure = v; redraw(); } });
+      const reset = () => { if (!stopCtl.get()) stopCtl.apply(true); if (measCtl.get() !== "cosine") measCtl.apply("cosine"); };
+      const ex = examples([
+        { label: "Type the sample note", note: "The note is typed word by word. Each new word changes the vector, and the failure modes re-sort live. Watch which row climbs to the top once the cavitation words arrive.", run: async () => { reset(); await erase(20); await typeText(SAMPLE); await sleep(400); } },
+        { label: "Stop words off, then on", note: "With stop words kept, words like the, was and and are shared with every FMEA entry and lift all scores. Watch the bars rise and the shared-word lists fill with filler, then fall back when they are removed again.", run: async () => { reset(); ta.value = SAMPLE; redraw(); await sleep(500); stopCtl.apply(false); await sleep(2200); stopCtl.apply(true); await sleep(1200); } },
+        { label: "Same note, three times longer", note: "The note is pasted twice more. The cosine bars do not move: the direction of the vector is the same. Then the measure switches to 1/(1 + Euclidean): the long note is far from every entry, and the bars jump up when the note shrinks back to one copy. Euclidean punishes length.", run: async () => { reset(); ta.value = SAMPLE; redraw(); await sleep(600); await typeText(" " + SAMPLE, 25, true); await typeText(" " + SAMPLE, 25, true); await sleep(900); measCtl.apply("euclid"); await sleep(1600); ta.value = SAMPLE; redraw(); await sleep(1600); measCtl.apply("cosine"); } },
+        { label: "Empty note", kind: "edge", note: "The note is erased word by word. When the last word goes, the vector is all zeros and cosine has nothing to divide by.", run: async () => { reset(); if (!ta.value) ta.value = SAMPLE; await erase(); await sleep(400); } },
+        { label: "Only stop words", kind: "edge", note: "A note made only of stop words. After stop-word removal nothing is left: a zero vector, just like an empty note.", run: async () => { reset(); await erase(20); await typeText("It is not as it was, and it will not be."); } },
+        { label: "No shared words", kind: "edge", note: "A note that shares no word with the FMEA sheet. Every similarity is 0: a six-way tie.", run: async () => { reset(); await erase(20); await typeText("Unit stopped overnight.", 200); } },
+      ]);
+      ta.addEventListener("input", redraw); redraw();
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, h("div", { class: "ctl" }, h("label", {}, h("span", {}, "Technician note (type or paste)")), ta), stopCtl, measCtl), h("div", { class: "stage" }, stats, msg, head, board)));
+    },
+  });
+
+  steps.push({
+    id: "correlation", title: "Vibration trends: same shape, different level", time: 10,
+    theory: `<h3>Pearson's correlation</h3>
+      <p>corr(x, y) = cov(x, y) / (s<sub>x</sub> s<sub>y</sub>), in [−1, 1]. It measures a linear relationship after removing each variable's mean and scale, so it is the right similarity for <b>profiles</b> where the shape matters and the level does not: the vibration trend of a small pump and of a big pump developing the same fault, or two sensors measuring the same signal with different calibrations. The lecture's examples: x = (−3, 6, 0, 3, −6), y = (1, −2, 0, −1, 2) have corr = −1 (perfectly opposite), and x = (3, 6, 0, 3, 6), y = (1, 2, 0, 1, 2) have corr = 1. In both cases the Euclidean distance is large.</p>`,
+    ask: `<div class='a'>Set offset 5 and gain 2: Euclidean says "far", correlation says "same signature". Ask when each is the right call (the absolute level matters, as for an alarm limit: Euclidean; the pattern matters, as when matching a failure signature: correlation). Then set the gain negative: a sensor wired with the wrong sign.</div>
+      <div class='a'>"Flip the sign" glides the gain through 0: for a moment trend B is flat and correlation is undefined. The edge cases make this explicit (a frozen sensor reads a constant, standard deviation 0) and show B identical to A (Euclidean 0, correlation 1).</div>`,
+    mount() {
+      let offset = 2, gain = 1, noise = 0.3;
+      const cv = canvas(760, 240), out = h("div", { class: "metrics" }), msg = h("div");
+      const base = [2.1, 2.3, 2.2, 2.6, 2.9, 3.4, 3.3, 4.1, 4.8, 5.6, 6.9, 8.4];
+      function redraw() {
+        const rng = RNG(2); const y = base.map((v) => offset + gain * v + rng.normal(0, noise));
+        const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height);
+        const all = base.concat(y); const lo = Math.min(...all) - 1, hi = Math.max(...all) + 1; const pad = 30;
+        const X = (i) => pad + (i / (base.length - 1)) * (cv.width - 2 * pad), Y = (v) => cv.height - pad - ((v - lo) / (hi - lo)) * (cv.height - 2 * pad);
+        if (lo < 0 && hi > 0) { ctx.strokeStyle = css("--line"); ctx.beginPath(); ctx.moveTo(pad, Y(0)); ctx.lineTo(cv.width - pad, Y(0)); ctx.stroke(); }
+        [["Pump A (P-101A): vibration, mm/s", base, css("--lagoon")], ["Pump B (P-117C)", y, css("--coral")]].forEach(([name, s, color], j) => { ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); s.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke(); ctx.fillStyle = color; s.forEach((v, i) => { ctx.beginPath(); ctx.arc(X(i), Y(v), 3, 0, 7); ctx.fill(); }); ctx.font = "12px Public Sans"; ctx.fillText(name, pad + j * 300, 14); });
+        ctx.fillStyle = css("--muted"); for (let i = 0; i < base.length; i++) ctx.fillText(2 * i + "h", X(i) - 8, cv.height - 10);
+        const flat = sd(y) < 1e-9, zeroB = norm(y) < 1e-12, e = euclid(base, y);
+        const r = flat ? null : pearson(base, y), c = zeroB ? null : cosine(base, y);
+        showIn(out, metric("Pearson correlation", r === null ? "undefined" : fmt(r, 3), r === null ? "bad" : Math.abs(r) > 0.9 ? "good" : ""), metric("Euclidean distance", fmt(e, 1)), metric("Cosine", c === null ? "undefined" : fmt(c, 3)));
+        showIn(msg,
+          flat ? callout(`Pump B's trend is flat: every value is ${fmt(y[0], 1)} mm/s. Its standard deviation is 0, so corr = cov / (s<sub>A</sub> s<sub>B</sub>) divides by 0: undefined. A constant signal has no shape to compare; in a plant this is usually a frozen sensor.${zeroB ? " B is also the zero vector, so cosine is undefined too." : ""}`, "edge") : null,
+          e < 1e-9 ? callout("B is exactly A: Euclidean distance 0, correlation 1, cosine 1. Every measure agrees on identical objects.", "edge") : null);
+      }
+      const offCtl = range({ label: "B = offset + gain × A + noise: offset (mm/s)", min: -5, max: 10, step: 0.5, value: offset, fmt: (v) => v.toFixed(1), onchange: (v) => { offset = v; redraw(); } });
+      const gainCtl = range({ label: "gain", min: -2, max: 3, step: 0.1, value: gain, fmt: (v) => v.toFixed(1), onchange: (v) => { gain = +v.toFixed(2); redraw(); } });
+      const noiseCtl = range({ label: "noise sd (mm/s)", min: 0, max: 2, step: 0.1, value: noise, fmt: (v) => v.toFixed(1), onchange: (v) => { noise = +v.toFixed(2); redraw(); } });
+      const ex = examples([
+        { label: "Shift and stretch", note: "Noise goes to 0, then B is shifted up by 5 and stretched by 2. The curves move apart and Euclidean grows, but correlation stays at 1: the same shape.", run: async () => { await noiseCtl.animateTo(0, 600); await offCtl.animateTo(5, 1400); await gainCtl.animateTo(2, 1400); } },
+        { label: "Flip the sign", note: "The gain glides from positive to −1: B turns upside down and correlation goes from +1 to −1. On the way the gain passes 0, where B is flat and correlation is undefined for a moment.", run: async () => { await noiseCtl.animateTo(0, 500); await gainCtl.animateTo(1, 600); await sleep(300); await gainCtl.animateTo(-1, 3000); } },
+        { label: "Bury it in noise", note: "Offset 2, gain 1, then the noise rises to 2 mm/s. B gets jagged and the correlation falls: noise hides the shared shape.", run: async () => { await offCtl.animateTo(2, 600); await gainCtl.animateTo(1, 600); await noiseCtl.animateTo(0, 500); await noiseCtl.animateTo(2, 2600); } },
+        { label: "Flat trend (frozen sensor)", kind: "edge", note: "Noise and gain go to 0: B is a constant line at the offset. Zero variance, so correlation is undefined.", run: async () => { await noiseCtl.animateTo(0, 700); await gainCtl.animateTo(0, 1600); } },
+        { label: "B identical to A", kind: "edge", note: "Offset 0, gain 1, noise 0: the red curve slides onto the blue one.", run: async () => { await noiseCtl.animateTo(0, 600); await gainCtl.animateTo(1, 900); await offCtl.animateTo(0, 1400); } },
+      ]);
+      redraw();
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, offCtl, gainCtl, noiseCtl), h("div", { class: "stage" }, cv, out, msg)));
+    },
+  });
+
+  steps.push({
+    id: "mahalanobis", title: "Correlated sensors: Mahalanobis distance for anomaly alarms", time: 10,
+    theory: `<h3>Distance that knows the shape of the data</h3>
+      <p>On a healthy centrifugal pump, flow and discharge pressure are tied together by the <b>pump curve</b>: more flow, less pressure. The cloud of healthy readings is a tilted ellipse. A reading far from the center <i>along</i> the curve is just a different operating point; a reading <i>off</i> the curve (normal flow, low pressure) means something is wrong: wear, a blockage, gas in the liquid. Euclidean distance cannot tell. <b>Mahalanobis distance</b> D<sub>M</sub>(x, y) = √((x − y) Σ<sup>−1</sup> (x − y)ᵀ) uses the covariance matrix Σ to rescale and rotate: it is Euclidean distance in the whitened space. With uncorrelated attributes of equal variance it reduces to Euclidean; with different scales it does the standardization for you. The lecture's example has D<sub>M</sub> = 6 where D<sub>E</sub> = 14.7.</p>`,
+    ask: `<div class='a'>Move the probe along the pump curve (more flow, less pressure): Euclidean grows, Mahalanobis barely moves. Move it off the curve (keep the flow, drop the pressure by 5 bar): Mahalanobis jumps. Ask: which one should the condition-monitoring alarm use? Then: what happens to the ellipse if the training data already contains faulty readings? (Going deeper: robust covariance.)</div>
+      <div class='a'>The examples walk the probe for you and leave a trail. Edge cases: a reading exactly on contour 3 (the rule "alarm if > 3" stays silent, "≥ 3" would fire: the specification must say which), and a reading at the center (both distances 0).</div>`,
+    mount() {
+      let px = 380, py = 40;
+      const cv = canvas(760, 360), out = h("div", { class: "metrics" }), msg = h("div"), trail = [];
+      const rng = RNG(7), xs = [], ys = [];
+      for (let i = 0; i < 150; i++) { const f = clamp(rng.normal(380, 90), 120, 640); xs.push(f); ys.push(62 - 0.045 * f + rng.normal(0, 1.2)); }
+      const mx = mean(xs), my = mean(ys);
+      let sxx = 0, sxy = 0, syy = 0; xs.forEach((x, i) => { sxx += (x - mx) ** 2; sxy += (x - mx) * (ys[i] - my); syy += (ys[i] - my) ** 2; }); const n = xs.length - 1; sxx /= n; sxy /= n; syy /= n;
+      const det = sxx * syy - sxy * sxy; const inv = [[syy / det, -sxy / det], [-sxy / det, sxx / det]];
+      const dm = (x, y) => { const dx = x - mx, dy = y - my; return Math.sqrt(dx * (inv[0][0] * dx + inv[0][1] * dy) + dy * (inv[1][0] * dx + inv[1][1] * dy)); };
+      const de = (x, y) => Math.hypot((x - mx) / Math.sqrt(sxx), (y - my) / Math.sqrt(syy));
+      function redraw() {
+        const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height);
+        const pad = { l: 44, r: 12, t: 16, b: 28 }, xlo = 100, xhi = 660, ylo = 28, yhi = 60;
+        const X = (x) => pad.l + ((x - xlo) / (xhi - xlo)) * (cv.width - pad.l - pad.r), Y = (y) => pad.t + (1 - (y - ylo) / (yhi - ylo)) * (cv.height - pad.t - pad.b);
+        const d = dm(px, py), onLimit = Math.abs(d - 3) < 1e-6, alarm = d > 3 && !onLimit;
+        [1, 2, 3].forEach((k) => { ctx.strokeStyle = k === 3 ? (onLimit ? css("--focus") : css("--coral")) : css("--sand-2"); ctx.lineWidth = k === 3 ? 2 : 1; ctx.setLineDash([4, 3]); ctx.beginPath(); for (let t = 0; t <= 100; t++) { const a = (t / 100) * 2 * Math.PI; const ux = Math.cos(a), uy = Math.sin(a); const q = ux * (inv[0][0] * ux + inv[0][1] * uy) + uy * (inv[1][0] * ux + inv[1][1] * uy); const s = k / Math.sqrt(q); const x = mx + s * ux, y = my + s * uy; t ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y)); } ctx.closePath(); ctx.stroke(); ctx.setLineDash([]); });
+        ctx.lineWidth = 1;
+        xs.forEach((x, i) => { ctx.fillStyle = "rgba(91,124,250,.5)"; ctx.beginPath(); ctx.arc(X(x), Y(ys[i]), 4, 0, 7); ctx.fill(); });
+        ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(X(mx), Y(my), 5, 0, 7); ctx.fill(); ctx.font = "12px Public Sans"; ctx.fillText("center", X(mx) + 8, Y(my));
+        trail.forEach(([x, y], i) => { ctx.globalAlpha = (0.5 * (i + 1)) / trail.length; ctx.fillStyle = css("--coral"); ctx.beginPath(); ctx.arc(X(x), Y(y), 3, 0, 7); ctx.fill(); });
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = alarm ? css("--coral") : css("--mint-2"); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(px), Y(py), 8, 0, 7); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1; ctx.fillStyle = css("--ink"); ctx.fillText("new reading", X(px) + 11, Y(py));
+        ctx.fillStyle = css("--muted"); ctx.fillText("flow (m³/h)", cv.width / 2 - 30, cv.height - 6); ctx.fillText("discharge pressure (bar)", 8, 12); ctx.fillText("blue: healthy readings · dashed: Mahalanobis distance 1, 2, 3 from the center", pad.l + 150, 12);
+        showIn(out, metric("Euclidean (standardized)", fmt(de(px, py), 2)), metric("Mahalanobis", fmt(d, 2), alarm ? "bad" : "good"), metric("Correlation flow, pressure", fmt(sxy / Math.sqrt(sxx * syy), 2)), metric("Alarm (Mahalanobis > 3)", alarm ? "yes" : onLimit ? "on the limit: no" : "no", alarm ? "bad" : "good"));
+        showIn(msg,
+          onLimit ? callout("The reading is exactly on the contour D<sub>M</sub> = 3. The rule \"alarm if D<sub>M</sub> > 3\" stays silent here; \"≥ 3\" would fire. At the boundary only the inequality sign decides, so the alarm specification must state it.", "edge") : null,
+          d < 1e-6 ? callout("The reading is the center of the healthy cloud: both distances are 0. The most typical reading possible.", "edge") : null);
+      }
+      const curve = (f) => 62 - 0.045 * f;
+      const setProbe = (x, y) => { px = x; py = y; pxCtl.set(x); pyCtl.set(y); trail.push([x, y]); if (trail.length > 120) trail.shift(); redraw(); };
+      const glide = (x, y, ms = 1500) => { const x0 = px, y0 = py; return tween(ms, (t) => setProbe(x0 + (x - x0) * t, y0 + (y - y0) * t)); };
+      const pxCtl = range({ label: "new reading: flow (m³/h)", min: 100, max: 660, step: 5, value: px, onchange: (v) => { px = v; trail.push([px, py]); if (trail.length > 120) trail.shift(); redraw(); } });
+      const pyCtl = range({ label: "new reading: pressure (bar)", min: 28, max: 60, step: 0.5, value: py, fmt: (v) => v.toFixed(1), onchange: (v) => { py = v; trail.push([px, py]); if (trail.length > 120) trail.shift(); redraw(); } });
+      const A0 = [300, curve(300)], A1 = [560, curve(560)], B0 = [380, curve(380)], B1 = [380, curve(380) - 5], C3 = [mx, my - 3 / Math.sqrt(inv[1][1])];
+      const ex = examples([
+        { label: "Walk along the pump curve", note: `The probe walks along the curve from ${A0[0]} to ${A1[0]} m³/h. Standardized Euclidean goes from ${fmt(de(...A0), 2)} to ${fmt(de(...A1), 2)}; Mahalanobis only from ${fmt(dm(...A0), 2)} to ${fmt(dm(...A1), 2)}. A different operating point, not a fault.`, run: async () => { trail.length = 0; await glide(...A0, 900); await sleep(300); await glide(...A1, 2600); } },
+        { label: "Step off the curve", note: `At ${B0[0]} m³/h the probe drops 5 bar below the curve. Mahalanobis jumps from ${fmt(dm(...B0), 2)} to ${fmt(dm(...B1), 2)} and the alarm fires; standardized Euclidean only goes from ${fmt(de(...B0), 2)} to ${fmt(de(...B1), 2)}.`, run: async () => { trail.length = 0; await glide(...B0, 900); await sleep(400); await glide(...B1, 2000); } },
+        { label: "Exactly on contour 3", kind: "edge", note: "The probe stops straight below the center, exactly on the red contour D<sub>M</sub> = 3. Is that an alarm?", run: async () => { trail.length = 0; await glide(mx, my, 900); await glide(...C3, 1800); } },
+        { label: "At the center", kind: "edge", note: "The probe glides to the center of the healthy cloud: both distances become 0.", run: async () => { trail.length = 0; await glide(mx, my, 1600); } },
+      ]);
+      redraw();
+      return h("div", {}, ex, h("div", { class: "lab" }, h("div", { class: "controls" }, pxCtl, pyCtl), h("div", { class: "stage" }, cv, out, msg)));
+    },
+  });
+
+  /* tournament: diagnose new trips by the root cause of the most similar past trip */
+  function diagnose(hist, queries, p) {
+    const st = NUM.map((k) => { const v = hist.map((c) => c[k]); return [mean(v), sd(v) || 1]; });
+    const f = (c) => NUM.map((k, j) => (p.std === "yes" ? (c[k] - st[j][0]) / st[j][1] : c[k]));
+    const H = hist.map(f), Q = queries.map(f);
+    const dnum = p.num === "euclid" ? euclid : p.num === "manhattan" ? manhattan : supremum;
+    const { vecs } = bow(hist.map((c) => c.note).concat(queries.map((c) => c.note)), p.stop === "yes");
+    return queries.map((q, i) => {
+      let best = -1, bs = -Infinity;
+      hist.forEach((c, j) => {
+        const sNum = 1 / (1 + dnum(Q[i], H[j]));
+        const sBin = p.bin === "jaccard" ? jaccard(q.alarms, c.alarms) : smc(q.alarms, c.alarms);
+        const sTxt = p.txt === "cosine" ? cosine(vecs[hist.length + i], vecs[j]) : extJaccard(vecs[hist.length + i], vecs[j]);
+        const s = p.wnum * sNum + p.wbin * sBin + p.wtxt * sTxt;
+        if (s > bs) { bs = s; best = j; }
+      });
+      return hist[best].cause;
+    });
+  }
+  function tourRun(p, seeds) {
+    const accs = [];
+    for (const s of seeds) { const hist = history(s, 60), qs = history(s + 5000, 30), pred = diagnose(hist, qs, p); accs.push(mean(qs.map((q, i) => (pred[i] === q.cause ? 1 : 0)))); }
+    const acc = mean(accs);
+    return { points: 1000 * acc, details: [{ k: "Trips diagnosed correctly", v: fmt(100 * acc, 0) + "%" }], summary: "For each new trip, your similarity picks the most similar past trip and its root cause is your diagnosis. Points = 1000 × the share of new trips diagnosed correctly, averaged over the rounds." };
+  }
+  const TOUR = Lab.tournamentSpec({
+    labId: "L4",
+    intro: `<h3>Rules</h3><p>Each round has a maintenance history of 60 past trips with known root causes and 30 new trips to diagnose. Your system diagnoses a new trip as the root cause of its <b>most similar past trip</b>. Build the similarity: pick the numeric distance for the sensors, whether to standardize them, the measure for alarm codes (compared over all 60 alarm tags of the unit, most of them silent), the measure for technician notes, whether to remove stop words, and how to weight the three parts. Practice on 3 rounds; one official run on 5 hidden rounds. Points = 1000 × the share of new trips diagnosed correctly.</p>`,
+    params: [
+      { key: "num", label: "Sensors: distance", type: "select", string: true, options: [{ value: "euclid", label: "Euclidean" }, { value: "manhattan", label: "Manhattan" }, { value: "supremum", label: "Supremum" }], default: "euclid" },
+      { key: "std", label: "Standardize sensors", type: "select", string: true, options: [{ value: "no", label: "no" }, { value: "yes", label: "yes (z-scores)" }], default: "no" },
+      { key: "bin", label: "Alarm codes (binary)", type: "select", string: true, options: [{ value: "smc", label: "simple matching" }, { value: "jaccard", label: "Jaccard" }], default: "smc" },
+      { key: "txt", label: "Technician notes (text)", type: "select", string: true, options: [{ value: "cosine", label: "cosine" }, { value: "ej", label: "extended Jaccard" }], default: "cosine" },
+      { key: "stop", label: "Remove stop words", type: "select", string: true, options: [{ value: "no", label: "no" }, { value: "yes", label: "yes" }], default: "no" },
+      { key: "wnum", label: "weight: sensors", min: 0, max: 3, step: 0.1, default: 1, fmt: (v) => v.toFixed(1) },
+      { key: "wbin", label: "weight: alarm codes", min: 0, max: 3, step: 0.1, default: 1, fmt: (v) => v.toFixed(1) },
+      { key: "wtxt", label: "weight: notes", min: 0, max: 3, step: 0.1, default: 1, fmt: (v) => v.toFixed(1) },
+    ],
+    practiceSeeds: [41, 42, 43],
+    run: tourRun,
+  });
+  steps.push({
+    id: "tournament", title: "Tournament: the diagnosis league", tour: true, time: 20,
+    mount: () => h("div", {}, tournament(TOUR)),
+  });
+
+  window._lab4 = { history, diagnose, tourRun, HIST, NOISE, TOUR };
+  Lab.init({ title: "Lab 4: Similarity and distance", steps, footer: "Sunday, week 1. Slides: Data Mining and Data (measures of similarity)." });
+})();
+
+</script>
+</body>
+</html>
